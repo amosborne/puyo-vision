@@ -1,5 +1,6 @@
-from puyocv import Puyo
+from collections import defaultdict
 import numpy as np
+from puyocv import Puyo
 
 """
 PUYO ROBUST CLASSIFIER
@@ -34,3 +35,31 @@ Placement frames and pop frames are compiled and returned as the robust classifi
 is assumed that the first frame is the start of the game and the final frame is prior to any 
 end game animation.
 """
+
+def pruneBoardFlickers(board_flickers):
+    return board_flickers # dict: [frameno]=[(row,col,Puyo)]
+
+def alignBoardFlickers(board_flickers):
+    return board_flickers # dict: [frameno]=[(row,col,Puyo)]
+
+def puyoFlickerList(raw_puyo):
+    return [] # list: (frameno, Puyo)
+
+def boardFlickerList(raw_boards):
+    raw_boards = np.asarray(raw_boards)
+    board_flickers = defaultdict(list)
+    for row,col in np.ndindex(raw_boards.shape):
+        puyo_flickers = puyoFlickerList(raw_boards[:,row,col])
+        for frameno, puyo in puyo_flickers:
+            board_flickers[frameno].append((row,col,puyo))        
+    board_flickers = alignBoardFlickers(board_flickers)
+    board_flickers = pruneBoardFlickers(board_flickers)
+    return board_flickers # dict: [frameno]=[(row,col,Puyo)]
+
+# Raw classifications are received as a list (raw_clf) of tuples, index is the frame number.
+#   (1) First element is a numpy array reprenting the board. board[row][col] = Puyo
+#   (2) Second element is a tuple of the next Puyo pair.
+def robustClassify(raw_clf):
+    raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
+    board_flickers = boardFlickerList(raw_boards)
+    return None # list: (frameno, board, nextpuyo, ispop)
