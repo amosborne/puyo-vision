@@ -10,31 +10,41 @@ This module analyzes these raw classifications to robustly produce a sequence of
 which correspond to new puyo placements or puyo pop sequences.
 
 The most reliable elements detected by the raw classifications are:
-   1) The 4 frame 'transition' when the next puyo is drawn.
-   2) The 10 frame 'flickering' of puyos when undergoing a pop.
+   1) The ~4 frame 'transition' when the next puyo is drawn.
+   2) The ~10 frame 'flickering' of puyos when undergoing a pop. In fact, pops are a good
+      time to evaluate the entire board state because no puyos are falling or otherwise animating.
 
 Of course even those elements aren't always perfectly detected; animations which overlay or
 otherwise distort the puyos will often result in mis-classifications. Characteristics of the
 game may be further leveraged to be robust to these mis-classifications:
    1) When the next puyo is drawn, both puyos in the pair should register a change to empty.
    2) Puyos must pop in groups of like color of 4 or more (and garbage must be adjacent).
+   3) In general, the majority classification over many frames is the correct classification.
 
-When all pops are identified, the complete board state can be resolved. Take the first row
-of puyos, for example:
-   1) If no flickering is seen, then there was no pop. For all frames, compute the two most
-      common classifications. For those two classifications, locate the frame where if each
-      side of the frame (in time) is labelled the maximum number of classifications are
-      correct. Correlate this placement frame location with the next puyo transition frame.
-   2) If there is flickering, then there was a pop. Break the frame into segments and for 
-      each segment calculate the placement frame as above.
-
-Rows above the first row are slight more complicated; to determine the placement frame, the
-pops in rows below (but in the same column) must also be included in the segmentation.
+When all pops and next puyo transitions are identified, the entire board state sequence can
+be derived by the following steps:
+   1) At any transition if the frames between the prior transition and the next transition
+      contain no pops, determine the majority puyo class in each empty board position for
+      each frame window on either side of the transition and look for changes from empty.
+   2) At any transition if the prior frame window has no pops but the later frame window
+      does, determine the majority puyo class in each empty board position for the frames
+      during the pop flickering. Disambiguate the placement of two puyo pairs by which
+      board position held the final puyo classification for more frames since the previous
+      transition.
+   3) At any transition if both the prior frame window and later frame window has pops,
+      compare the board state between the final pop of the earlier sequence and the first
+      pop of the later sequence (again by using majority classification on empty frames).
 
 Placement frames and pop frames are compiled and returned as the robust classification. It
 is assumed that the first frame is the start of the game and the final frame is prior to any 
 end game animation.
 """
+
+# Pop animation flicker detection constants.
+_COLOR_FLICKER_FRAME_COUNT = 9
+_GRBGE_FLICKER_FRAME_COUNT = 7
+_COLOR_FLICKER_ERROR_ALLWD = 4
+_GRBGE_FLICKER_ERROR_ALLWD = 3
 
 def pruneBoardFlickers(board_flickers):
     return board_flickers # dict: [frameno]=[(row,col,Puyo)]
@@ -42,19 +52,28 @@ def pruneBoardFlickers(board_flickers):
 def alignBoardFlickers(board_flickers):
     return board_flickers # dict: [frameno]=[(row,col,Puyo)]
 
+# How many times a puyo flickers during a pop depends on the puyo type (garbage or not), and also
+# varies a little depending the animation. This function will scan the raw classification for a
+# a single puyo to meet either of the following constraints:
+#   (1) For 7 consecutive frames, the puyo alternates between garbage and empty (3 errors allowed)
+#   (2) For 9 consecutive frames, the puyo alternates between colored and empty (4 errors allowed)
+# The error thresholds were selected based on test data. The puyo color is taken to be the majority
+# color among any color classification errors within the sequence. This function will flag any
+# flickering puyo with errors to be further validated by adjacent flickering puyos later. The same
+# flicker sequence may also be flagged at different frames, this will also be cleaned later.
 def puyoFlickerList(raw_puyo):
-    return [] # list: (frameno, Puyo)
+    return [] # list: (frameno, Puyo, isperfect)
 
 def boardFlickerList(raw_boards):
     raw_boards = np.asarray(raw_boards)
     board_flickers = defaultdict(list)
     for row,col in np.ndindex(raw_boards.shape):
         puyo_flickers = puyoFlickerList(raw_boards[:,row,col])
-        for frameno, puyo in puyo_flickers:
-            board_flickers[frameno].append((row,col,puyo))        
+        for (frameno, puyo, isperfect) in puyo_flickers:
+            board_flickers[frameno].append((row,col,puyo,isperfect))        
     board_flickers = alignBoardFlickers(board_flickers)
     board_flickers = pruneBoardFlickers(board_flickers)
-    return board_flickers # dict: [frameno]=[(row,col,Puyo)]
+    return board_flickers # dict: [frameno]=[(row,col,Puyo,isperfect)]
 
 # Raw classifications are received as a list (raw_clf) of tuples, index is the frame number.
 #   (1) First element is a numpy array reprenting the board. board[row][col] = Puyo
