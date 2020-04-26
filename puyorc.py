@@ -6,6 +6,7 @@ from puyocv import Puyo
 from matplotlib import pyplot as plt
 import pandas as pd
 from scipy.signal import savgol_filter
+from copy import deepcopy
 
 """
 PUYO ROBUST CLASSIFIER
@@ -129,7 +130,9 @@ def puyoFlickerList(raw_puyo):
 # 2) multiply the normalized correlation by another (unnormalized) for the same color or garbage.
 #    threshold again; if exceeded then they are of the same pop. continue recursively.
 
-def correlateFlicker(raw_puyo,puyo_type):
+_FLICKER_THRESHOLD = 0.3
+
+def correlateFlicker(raw_puyo, puyo_type):
     # Define the flicker kernels.
     color_kernel = [ 1, 1, 1, 1,-1, 1,-1, 1,-1, 1,-1, 1, 0 ]
     grbge_kernel = [ 1, 1, 1,-1, 1,-1, 1,-1, 1, 0, 1, 1, 0 ]
@@ -141,7 +144,7 @@ def correlateFlicker(raw_puyo,puyo_type):
     wgt_count = Counter(unscaled_kernel)
     hi_weight = 0.5/wgt_count[ 1]
     lo_weight = 0.5/wgt_count[-1]
-    kernel    = np.empty_like(unscaled_kernel,dtype=np.float32)
+    kernel    = np.empty_like(unscaled_kernel, dtype=np.float32)
     for k,elem in enumerate(unscaled_kernel):
         if   elem ==  1: kernel[k] =  hi_weight
         elif elem == -1: kernel[k] = -lo_weight
@@ -149,54 +152,75 @@ def correlateFlicker(raw_puyo,puyo_type):
     # Compute the correlation, squared.
     signalhi = np.array([int(x==puyo_type) for x in raw_puyo])
     signallo = np.array([int(x==Puyo.NONE) for x in raw_puyo])
-    signal   = np.subtract(signalhi,signallo)
-    jag_corr = pd.Series(np.square(np.correlate(signal,kernel)))
+    signal   = np.subtract(signalhi, signallo)
+    jag_corr = pd.Series(np.square(np.correlate(signal, kernel)))
     # Smooth the output.
     ave_corr = jag_corr.rolling(len(kernel)).mean()
-    smt_corr = savgol_filter(ave_corr,len(kernel),3)
-    return     smt_corr
+    smt_corr = savgol_filter(ave_corr, len(kernel), 3)
+    return     np.nan_to_num(smt_corr, 0)
 
-def flickerPowerShare(raw_puyo,puyo_type):
-    this_power = correlateFlicker(raw_puyo,puyo_type)
-    hi_opwr = np.zeros_like(this_power,dtype=np.float32)
-    for puyo in Puyo:
-        if puyo is not Puyo.NONE and puyo is not puyo_type:
-            other_power = correlateFlicker(raw_puyo,puyo)
-            for idx,opwr in np.ndenumerate(other_power):
-                if opwr > hi_opwr[idx]:
-                    hi_opwr[idx] = opwr
-    return np.subtract(this_power,hi_opwr)
+def evalFlickerThreshold(raw_puyo, puyo_type, matching_flicker=None):
+    flicker = correlateFlicker(raw_puyo, puyo_type)
+    if matching_flicker is None:
+        matching_flicker = np.ones_like(flicker, dtype=np.float32)
+    match = np.multiply(flicker, matching_flicker)
+    maxf = np.max(match)
+    if maxf > _FLICKER_THRESHOLD:
+        match_norm = np.divide(match, maxf)
+       # plt.subplots()
+      #  plt.plot(match)
+     #   plt.show()
+        return True, match_norm
+    #print('test')
+    return False, []
 
+def getAllPops(raw_boards):
+    puyos_pos = set()
+    for row,col in np.ndindex(raw_boards.shape[1:]):
+        raw_puyo = raw_boards[:,row,col]
+        for puyo_type in Puyo:
+            if puyo_type is Puyo.NONE: continue
+            if evalFlickerThreshold(raw_puyo, puyo_type)[0]:
+                puyos_pos.add((row,col,puyo_type))
+    return frozenset(puyos_pos)
+
+def findFlickerGroups(raw_boards, remaining_puyo_pops=None, working_flicker=None):
+    if remaining_puyo_pops is None:
+        remaining_puyo_pops = getAllPops(raw_boards)
+    print(len(remaining_puyo_pops))
+    # Recursive loop.
+    flicker_groups = set()
+    for puyo_pop in remaining_puyo_pops:
+        row,col,clr = puyo_pop
+        raw_puyo = raw_boards[:,row,col]
+        popmatch, flicker = evalFlickerThreshold(raw_puyo, clr, working_flicker)
+        
+            ## DEBUG
+            #print((row,col,puyo_type))
+            #plt.subplots()
+            #plt.plot(flicker)
+            #plt.show()
+            ##
+            
+        if popmatch:
+            next_remaining_puyo_pops = remaining_puyo_pops - frozenset([puyo_pop])
+            print(puyo_pop,next_remaining_puyo_pops)
+            recurse_results =  findFlickerGroups(raw_boards,
+                                                 remaining_puyo_pops=next_remaining_puyo_pops,
+                                                 working_flicker=flicker)
+            #print(recurse_results)
+            for result in recurse_results:
+                flicker_groups.add(frozenset([member]) | result)
+                    
+    #print(flicker_groups)                
+    return frozenset(flicker_groups)
+    
 def boardFlickerList(raw_boards):
     raw_boards = np.asarray(raw_boards)
-    for row,col in np.ndindex(raw_boards.shape[1:]):
-        puyo_type = Puyo.YELLOW
+    # Construct a frozen set of all puyo board positions.
+    flicker_groups = findFlickerGroups(raw_boards)
         
-        raw_puyo = raw_boards[:,row,col]
-        flckr = correlateFlicker(raw_puyo,puyo_type)
-        pwr_share = flickerPowerShare(raw_puyo,puyo_type)
-
-        print(row,col)
-        if ((row == 7) or (row == 8)) and ((col == 2) or (col == 3)):
-            signal = [x==puyo_type for x in raw_puyo]
-            fig,(ax1,ax2) = plt.subplots(2,sharex=True)
-            #ax1.plot(pwr_share)
-            ax1.set_ylim((-1,1))
-            ax1.plot(flckr)
-            ax2.plot(signal)
-            plt.show()
-        #if row == 1: break
-        
-    return None # old code below just chillin
-
-    board_flickers = defaultdict(list)
-    for row,col in np.ndindex(raw_boards.shape[1:]):
-        puyo_flickers = puyoFlickerList(raw_boards[:,row,col])
-        for (frameno, puyo, errors) in puyo_flickers:
-            board_flickers[frameno].append((row,col,puyo,errors))        
-    board_flickers = alignBoardFlickers(board_flickers)
-    board_flickers = pruneBoardFlickers(board_flickers)
-    return board_flickers # dict: [frameno]=[(row,col,Puyo,errors)]
+    return None
 
 # Raw classifications are received as a list (raw_clf) of tuples, index is the frame number.
 #   (1) First element is a numpy array reprenting the board. board[row][col] = Puyo
