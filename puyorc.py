@@ -4,6 +4,8 @@ from math import ceil, floor
 import numpy as np
 from puyocv import Puyo
 from matplotlib import pyplot as plt
+import pandas as pd
+from scipy.signal import savgol_filter
 
 """
 PUYO ROBUST CLASSIFIER
@@ -44,16 +46,45 @@ end game animation.
 """
 
 # Pop animation flicker detection constants.
-_COLOR_FLICKER_FRAME_COUNT = 9
-_GRBGE_FLICKER_FRAME_COUNT = 7
-_COLOR_FLICKER_ERROR_ALLWD = (3,2)
-_GRBGE_FLICKER_ERROR_ALLWD = (2,1)
+_COLOR_FLICKER_FRAME_COUNT = 5
+_GRBGE_FLICKER_FRAME_COUNT = 5
+_COLOR_FLICKER_ERROR_ALLWD = (1,1)
+_GRBGE_FLICKER_ERROR_ALLWD = (1,1)
+_MAX_FLICKER_WINDOW = 20
 
 def pruneBoardFlickers(board_flickers):
-    return board_flickers # dict: [frameno]=[(row,col,Puyo)]
+    return board_flickers # dict: [frameno]=[(row,col,Puyo,errors)]
+
+# Flickers of a puyo with the same class and location within the same frame window are
+# greedily condensed to the earliest frame.
+def alignPuyoFlickers(board_flickers):
+    aligned_puyo_flickers = defaultdict(list)
+    # For each frame marked for flickering...
+    for frameno,flicker_list in board_flickers.items():
+        # Loop through each puyo that is flickering...
+        for puyo_flicker in flicker_list:
+            iscovered = False
+            # Loop through the aligned flickering dictionary...
+            for al_frameno,al_flicker_list in aligned_puyo_flickers.items():
+                # Loop through each puyo that is flickering aligned...
+                for al_puyo_flicker in al_flicker_list:
+                    within_window = frameno < (al_frameno + _MAX_FLICKER_WINDOW)
+                    same_puyo = puyo_flicker[0:3] == al_puyo_flicker[0:3]
+                    # If it's a different puyo or it's outside the window, add it.
+                    if within_window and same_puyo:
+                        iscovered = True
+            if not iscovered:
+                aligned_puyo_flickers[frameno].append(puyo_flicker)
+    return aligned_puyo_flickers # dict: [frameno]=[(row,col,Puyo,errors)]
+
+def alignGroupFlickers(board_flickers):
+    
+    return board_flickers
 
 def alignBoardFlickers(board_flickers):
-    return board_flickers # dict: [frameno]=[(row,col,Puyo)]
+    aligned_puyo_flickers = alignPuyoFlickers(board_flickers)
+    aligned_group_flickers = alignGroupFlickers(aligned_puyo_flickers)
+    return aligned_group_flickers
 
 def evalFlicker(seq,err):
     fc = len(seq)
@@ -92,8 +123,72 @@ def puyoFlickerList(raw_puyo):
             puyo_flickers.append((frameno,puyo,error))
     return puyo_flickers # list: (frameno, Puyo, errors)
 
+# Lets try an alternate solution:
+# 1) for each position and each puyo type (non-empty), apply the scrolling flicker to the entire
+#    frame sequence and determine the correlation. threshold to some value, normalize to 1.
+# 2) multiply the normalized correlation by another (unnormalized) for the same color or garbage.
+#    threshold again; if exceeded then they are of the same pop. continue recursively.
+
+def correlateFlicker(raw_puyo,puyo_type):
+    # Define the flicker kernels.
+    color_kernel = [ 1, 1, 1, 1,-1, 1,-1, 1,-1, 1,-1, 1, 0 ]
+    grbge_kernel = [ 1, 1, 1,-1, 1,-1, 1,-1, 1, 0, 1, 1, 0 ]
+    if   puyo_type is     Puyo.GARBAGE:
+        unscaled_kernel = grbge_kernel
+    elif puyo_type is not Puyo.NONE:
+        unscaled_kernel = color_kernel
+    # Scale the kernel to equally weight the two alternating puyo types.
+    wgt_count = Counter(unscaled_kernel)
+    hi_weight = 0.5/wgt_count[ 1]
+    lo_weight = 0.5/wgt_count[-1]
+    kernel    = np.empty_like(unscaled_kernel,dtype=np.float32)
+    for k,elem in enumerate(unscaled_kernel):
+        if   elem ==  1: kernel[k] =  hi_weight
+        elif elem == -1: kernel[k] = -lo_weight
+        else:            kernel[k] =  0
+    # Compute the correlation, squared.
+    signalhi = np.array([int(x==puyo_type) for x in raw_puyo])
+    signallo = np.array([int(x==Puyo.NONE) for x in raw_puyo])
+    signal   = np.subtract(signalhi,signallo)
+    jag_corr = pd.Series(np.square(np.correlate(signal,kernel)))
+    # Smooth the output.
+    ave_corr = jag_corr.rolling(len(kernel)).mean()
+    smt_corr = savgol_filter(ave_corr,len(kernel),3)
+    return     smt_corr
+
+def flickerPowerShare(raw_puyo,puyo_type):
+    this_power = correlateFlicker(raw_puyo,puyo_type)
+    hi_opwr = np.zeros_like(this_power,dtype=np.float32)
+    for puyo in Puyo:
+        if puyo is not Puyo.NONE and puyo is not puyo_type:
+            other_power = correlateFlicker(raw_puyo,puyo)
+            for idx,opwr in np.ndenumerate(other_power):
+                if opwr > hi_opwr[idx]:
+                    hi_opwr[idx] = opwr
+    return np.subtract(this_power,hi_opwr)
+
 def boardFlickerList(raw_boards):
     raw_boards = np.asarray(raw_boards)
+    for row,col in np.ndindex(raw_boards.shape[1:]):
+        puyo_type = Puyo.YELLOW
+        
+        raw_puyo = raw_boards[:,row,col]
+        flckr = correlateFlicker(raw_puyo,puyo_type)
+        pwr_share = flickerPowerShare(raw_puyo,puyo_type)
+
+        print(row,col)
+        if ((row == 7) or (row == 8)) and ((col == 2) or (col == 3)):
+            signal = [x==puyo_type for x in raw_puyo]
+            fig,(ax1,ax2) = plt.subplots(2,sharex=True)
+            #ax1.plot(pwr_share)
+            ax1.set_ylim((-1,1))
+            ax1.plot(flckr)
+            ax2.plot(signal)
+            plt.show()
+        #if row == 1: break
+        
+    return None # old code below just chillin
+
     board_flickers = defaultdict(list)
     for row,col in np.ndindex(raw_boards.shape[1:]):
         puyo_flickers = puyoFlickerList(raw_boards[:,row,col])
@@ -110,9 +205,16 @@ def robustClassify(raw_clf):
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
     board_flickers = boardFlickerList(raw_boards)
 
-    plt.subplots()
-    for frameno,flickers in board_flickers.items():
-        plt.plot(frameno,len(flickers),'x')
-    plt.show()
+    #print(board_flickers[110])
+    #print(board_flickers[114])
+    #print(board_flickers[117])
+    # print(board_flickers[115])
+    # print(board_flickers[117])
+    # print(board_flickers[124])
+    
+    #plt.subplots()
+    #for frameno,flickers in board_flickers.items():
+    #    plt.plot(frameno,len(flickers),'x')
+    #plt.show()
     
     return board_flickers # list: (frameno, board, nextpuyo, ispop)
