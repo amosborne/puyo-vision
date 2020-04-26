@@ -1,6 +1,9 @@
-from collections import defaultdict
+from collections import defaultdict, Counter
+from warnings import warn
+from math import ceil, floor
 import numpy as np
 from puyocv import Puyo
+from matplotlib import pyplot as plt
 
 """
 PUYO ROBUST CLASSIFIER
@@ -43,8 +46,8 @@ end game animation.
 # Pop animation flicker detection constants.
 _COLOR_FLICKER_FRAME_COUNT = 9
 _GRBGE_FLICKER_FRAME_COUNT = 7
-_COLOR_FLICKER_ERROR_ALLWD = 4
-_GRBGE_FLICKER_ERROR_ALLWD = 3
+_COLOR_FLICKER_ERROR_ALLWD = (3,2)
+_GRBGE_FLICKER_ERROR_ALLWD = (2,1)
 
 def pruneBoardFlickers(board_flickers):
     return board_flickers # dict: [frameno]=[(row,col,Puyo)]
@@ -52,28 +55,53 @@ def pruneBoardFlickers(board_flickers):
 def alignBoardFlickers(board_flickers):
     return board_flickers # dict: [frameno]=[(row,col,Puyo)]
 
+def evalFlicker(seq,err):
+    fc = len(seq)
+    hi = Counter(seq[0:fc:2])
+    lo = Counter(seq[1:(fc-1):2])
+    clr = hi.most_common(1)[0][0]
+    err_hi = ceil(fc/2) - hi[clr]
+    err_lo = floor(fc/2) - lo[Puyo.NONE]
+    if (err_hi < err[0]) and (err_lo < err[1]):
+        return (clr,err_hi+err_lo)
+    return (None,0)
+
 # How many times a puyo flickers during a pop depends on the puyo type (garbage or not), and also
 # varies a little depending the animation. This function will scan the raw classification for a
 # a single puyo to meet either of the following constraints:
 #   (1) For 7 consecutive frames, the puyo alternates between garbage and empty (3 errors allowed)
-#   (2) For 9 consecutive frames, the puyo alternates between colored and empty (4 errors allowed)
-# The error thresholds were selected based on test data. The puyo color is taken to be the majority
+#   (2) For 9 consecutive frames, the puyo alternates between colored and empty (5 errors allowed)
+# The error thresholds are selected to be forgiving. The puyo color is taken to be the majority
 # color among any color classification errors within the sequence. This function will flag any
 # flickering puyo with errors to be further validated by adjacent flickering puyos later. The same
 # flicker sequence may also be flagged at different frames, this will also be cleaned later.
 def puyoFlickerList(raw_puyo):
-    return [] # list: (frameno, Puyo, isperfect)
+    puyo_flickers = []
+    total_frames = len(raw_puyo)
+    for frameno, _ in enumerate(raw_puyo[:-_COLOR_FLICKER_FRAME_COUNT]): # bounds not critical
+        # Evaluate for garbage flicker.
+        seq = raw_puyo[frameno:(frameno+_GRBGE_FLICKER_FRAME_COUNT):2]
+        puyo, error = evalFlicker(seq,_GRBGE_FLICKER_ERROR_ALLWD)
+        if puyo is Puyo.GARBAGE:
+            puyo_flickers.append((frameno,puyo,error))
+            continue
+        # Evaluate for color flicker if it wasn't garbage flicker.
+        seq = raw_puyo[frameno:(frameno+_COLOR_FLICKER_FRAME_COUNT):2]
+        puyo, error = evalFlicker(seq,_COLOR_FLICKER_ERROR_ALLWD)
+        if puyo is not None and puyo is not Puyo.NONE:
+            puyo_flickers.append((frameno,puyo,error))
+    return puyo_flickers # list: (frameno, Puyo, errors)
 
 def boardFlickerList(raw_boards):
     raw_boards = np.asarray(raw_boards)
     board_flickers = defaultdict(list)
-    for row,col in np.ndindex(raw_boards.shape):
+    for row,col in np.ndindex(raw_boards.shape[1:]):
         puyo_flickers = puyoFlickerList(raw_boards[:,row,col])
-        for (frameno, puyo, isperfect) in puyo_flickers:
-            board_flickers[frameno].append((row,col,puyo,isperfect))        
+        for (frameno, puyo, errors) in puyo_flickers:
+            board_flickers[frameno].append((row,col,puyo,errors))        
     board_flickers = alignBoardFlickers(board_flickers)
     board_flickers = pruneBoardFlickers(board_flickers)
-    return board_flickers # dict: [frameno]=[(row,col,Puyo,isperfect)]
+    return board_flickers # dict: [frameno]=[(row,col,Puyo,errors)]
 
 # Raw classifications are received as a list (raw_clf) of tuples, index is the frame number.
 #   (1) First element is a numpy array reprenting the board. board[row][col] = Puyo
@@ -81,4 +109,10 @@ def boardFlickerList(raw_boards):
 def robustClassify(raw_clf):
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
     board_flickers = boardFlickerList(raw_boards)
-    return None # list: (frameno, board, nextpuyo, ispop)
+
+    plt.subplots()
+    for frameno,flickers in board_flickers.items():
+        plt.plot(frameno,len(flickers),'x')
+    plt.show()
+    
+    return board_flickers # list: (frameno, board, nextpuyo, ispop)
