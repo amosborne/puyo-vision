@@ -128,6 +128,50 @@ def transitionList(raw_nextpuyo):
             isblank = False
     return transitions
 
+def hasPopSequence(early_frame,later_frame,board_flickers):
+    popsequence = {}
+    for popframe,poplist in board_flickers.items():
+        if early_frame < popframe < later_frame:
+            popsequence[popframe] = poplist
+    if popsequence: return True, popsequence
+    else:           return False, None
+
+def noPopBoardDetermination(prev_board_state, raw_boards, transitions):
+    next_board_state = np.copy(prev_board_state)
+    lastt,t,nextt = transitions
+    for (row,col), puyo in np.ndenumerate(prev_board_state):
+        if puyo is not Puyo.NONE: continue
+        raw_puyo = raw_boards[:,row,col]
+        prev_color = Counter(raw_puyo[lastt:t])
+        prev_color = prev_color.most_common(1)[0][0]
+        next_color = Counter(raw_puyo[t:nextt])
+        next_color = next_color.most_common(1)[0][0]
+        if prev_color is not None:
+            next_board_state[row,col] = prev_color
+        elif next_color is not None:
+            next_board_state[row,col] = next_color
+    return next_board_state
+
+def buildBoardSequence(raw_boards, transitions, board_flickers):
+    raw_boards = np.asarray(raw_boards)
+    for idx,t in enumerate(transitions[:-1]):
+        if idx == 0:
+            board_state = [(t, np.empty_like(raw_boards[0], dtype=Puyo))]
+            board_state[0][1].fill(Puyo.NONE)
+        else:
+            lastt = transitions[idx-1]
+            nextt = transitions[idx+1]
+            hasprepop,  prepoplist  = hasPopSequence(lastt,t,board_flickers)
+            haspostpop, postpoplist = hasPopSequence(t,nextt,board_flickers)
+            if hasprepop and haspostpop: continue # UPDATE
+            elif hasprepop:  continue # UPDATE
+            elif haspostpop: continue # UPDATE
+            else:
+                board_state.append( (t, noPopBoardDetermination(board_state[-1][1],
+                                                                raw_boards,
+                                                                (lastt,t,nextt))))
+    return board_state
+
 # Raw classifications are received as a list (raw_clf) of tuples, index is the frame number.
 #   (1) First element is a numpy array reprenting the board. board[row][col] = Puyo
 #   (2) Second element is a tuple of the next Puyo pair.
@@ -135,4 +179,5 @@ def robustClassify(raw_clf):
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
     board_flickers = boardFlickerList(raw_boards)
     transitions = transitionList(raw_nextpuyo)
+    board_seq = buildBoardSequence(raw_boards,transitions,board_flickers)
     return None
