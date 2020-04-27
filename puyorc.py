@@ -4,6 +4,8 @@ from pandas import Series
 import numpy as np
 from puyocv import Puyo
 
+from matplotlib import pyplot as plt
+
 """
 PUYO ROBUST CLASSIFIER
 
@@ -47,7 +49,7 @@ _FLICKER_GROUP_MAX_GAP_SIZE = 15 # NOTE: Flicker kernel is of length 13
 
 def correlateFlicker(raw_puyo, puyo_type):
     # Define the flicker kernels.
-    color_kernel = [ 1, 1, 1, 1,-1, 1,-1, 1,-1, 1,-1, 1, 0 ]
+    color_kernel = [ 1, 1, 1, 1,-1, 1,-1, 1,-1, 1,-1, 1,-1 ]
     grbge_kernel = [ 1, 1, 1,-1, 1,-1, 1,-1, 1, 0, 1, 1, 0 ]
     if   puyo_type is     Puyo.GARBAGE:
         unscaled_kernel = grbge_kernel
@@ -109,10 +111,28 @@ def boardFlickerList(raw_boards):
     board_flickers = validateFlickers(board_flickers)
     return board_flickers # dict[frameno]:[(row,col,puyo)]
 
+def transitionList(raw_nextpuyo):
+    both_blank = []
+    for (b1,b2) in raw_nextpuyo:
+        if b1 is Puyo.NONE and b2 is Puyo.NONE:
+            both_blank.append(True)
+        else:
+            both_blank.append(False)
+    transitions = []
+    isblank = False
+    for idx,b in enumerate(both_blank):
+        if b and not isblank:
+            transitions.append(idx)
+            isblank = True
+        elif not b and isblank:
+            isblank = False
+    return transitions
+
 # Raw classifications are received as a list (raw_clf) of tuples, index is the frame number.
 #   (1) First element is a numpy array reprenting the board. board[row][col] = Puyo
 #   (2) Second element is a tuple of the next Puyo pair.
 def robustClassify(raw_clf):
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
     board_flickers = boardFlickerList(raw_boards)
+    transitions = transitionList(raw_nextpuyo)
     return None
