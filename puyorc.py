@@ -68,7 +68,7 @@ def correlateFlicker(raw_puyo, puyo_type):
     signalhi = np.array([int(x==puyo_type) for x in raw_puyo])
     signallo = np.array([int(x==Puyo.NONE) for x in raw_puyo])
     signal   = np.subtract(signalhi, signallo)
-    jag_corr = Series(np.square(np.correlate(signal, kernel)))
+    jag_corr = Series(np.square(np.correlate(signal, kernel))) # this is a bit of a hack.
     # Smooth the output.
     ave_corr = jag_corr.rolling(len(kernel)).mean()
     smt_corr = savgol_filter(ave_corr, len(kernel), 3)
@@ -136,6 +136,8 @@ def hasPopSequence(early_frame,later_frame,board_flickers):
     if popsequence: return True, popsequence
     else:           return False, None
 
+_PREVIOUS_PLACEMENT_NEXT_WINDOW_SHARE_THRESHOLD = 0.9 # not clear how well tuned this is.
+    
 def noPopBoardDetermination(prev_board_state, raw_boards, transitions):
     next_board_state = np.copy(prev_board_state)
     lastt,t,nextt = transitions
@@ -145,11 +147,13 @@ def noPopBoardDetermination(prev_board_state, raw_boards, transitions):
         prev_color = Counter(raw_puyo[lastt:t])
         prev_color = prev_color.most_common(1)[0][0]
         next_color = Counter(raw_puyo[t:nextt])
-        next_color = next_color.most_common(1)[0][0]
-        if prev_color is not None:
+        next_color = next_color.most_common(1)[0]
+        if prev_color is not Puyo.NONE:
             next_board_state[row,col] = prev_color
-        elif next_color is not None:
-            next_board_state[row,col] = next_color
+        elif next_color[0] is not Puyo.NONE:
+            share = next_color[1]/(nextt-t)
+            if share > _PREVIOUS_PLACEMENT_NEXT_WINDOW_SHARE_THRESHOLD:
+                next_board_state[row,col] = next_color[0]
     return next_board_state
 
 def buildBoardSequence(raw_boards, transitions, board_flickers):
@@ -163,14 +167,17 @@ def buildBoardSequence(raw_boards, transitions, board_flickers):
             nextt = transitions[idx+1]
             hasprepop,  prepoplist  = hasPopSequence(lastt,t,board_flickers)
             haspostpop, postpoplist = hasPopSequence(t,nextt,board_flickers)
-            if hasprepop and haspostpop: continue # UPDATE
-            elif hasprepop:  continue # UPDATE
-            elif haspostpop: continue # UPDATE
+            if hasprepop and haspostpop: break # UPDATE
+            elif hasprepop:  break # UPDATE
+            elif haspostpop: break # UPDATE
             else:
                 board_state.append( (t, noPopBoardDetermination(board_state[-1][1],
                                                                 raw_boards,
                                                                 (lastt,t,nextt))))
     return board_state
+
+import puyodebug
+import cv2
 
 # Raw classifications are received as a list (raw_clf) of tuples, index is the frame number.
 #   (1) First element is a numpy array reprenting the board. board[row][col] = Puyo
@@ -180,4 +187,8 @@ def robustClassify(raw_clf):
     board_flickers = boardFlickerList(raw_boards)
     transitions = transitionList(raw_nextpuyo)
     board_seq = buildBoardSequence(raw_boards,transitions,board_flickers)
+    for _,board in board_seq:
+        img = puyodebug.plotBoardState(board)
+        cv2.imshow('',img)
+        cv2.waitKey(0)
     return None
