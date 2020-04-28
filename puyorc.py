@@ -160,73 +160,64 @@ def findTransitions(raw_nextpuyo):
             isblank = False
     return transitions
 
-def hasPopSequence(early_frame,later_frame,board_flickers):
-    popsequence = {}
-    for popframe,poplist in board_flickers.items():
-        if early_frame < popframe < later_frame:
-            popsequence[popframe] = poplist
-    if popsequence: return True, popsequence
-    else:           return False, None
+def getPopSequence(prev_trans,next_trans,pop_groups):
+    pop_sequence = []
+    for pop_group in pop_groups:
+        if prev_trans < pop_group.frameno < next_trans:
+            pop_sequence.append(pop_group)
+    return pop_sequence
 
-_PREV_PLACEMENT_NEXT_WINDOW_SHARE_THRESH = 0.9 # not clear how well tuned this is.
-## This should be different. For each puyo position, get the majority puyo color across
-# both windows. Garbage is always accepted. Otherwise, the puyos are ranked in terms
-# of time spent on the board in their position, and the top two are selected. Hidden row difficulty?
-# The fastest a puyo can settle is 7-10 frames. On a transition, compute the majority puyo color
-# of the past 10 frames.
-# Handle garbage separately. if the next window contain majority garbage in a position, select it.
-def noPopBoardDetermination(prev_board_state, raw_boards, transitions):
-    next_board_state = np.copy(prev_board_state)
-    lastt,t,nextt = transitions
-    for (row,col), puyo in np.ndenumerate(prev_board_state):
-        if puyo is not Puyo.NONE: continue
-        raw_puyo = raw_boards[:,row,col]
-        prev_color = Counter(raw_puyo[lastt:t])
-        prev_color = prev_color.most_common(1)[0][0]
-        next_color = Counter(raw_puyo[t:nextt])
-        next_color = next_color.most_common(1)[0]
-        if prev_color is not Puyo.NONE:
-            next_board_state[row,col] = prev_color
-        elif next_color[0] is not Puyo.NONE:
-            share = next_color[1]/(nextt-t)
-            if share > _PREV_PLACEMENT_NEXT_WINDOW_SHARE_THRESH:
-                next_board_state[row,col] = next_color[0]
-    return next_board_state
+def buildBoardSequence(raw_boards, transitions, pop_groups):
+    """ Build the sequence of boards (with their respective frames)."""
 
-def buildBoardSequence(raw_boards, transitions, board_flickers):
-    raw_boards = np.asarray(raw_boards)
-    for idx,t in enumerate(transitions[:-1]):
+    State = namedtuple('State', 'frameno board')
+    # Initial the first board in the list of board states to be empty.
+    initial_board = np.empty_like(raw_boards[0], dtype=Puyo)
+    initial_board.fill(Puyo.NONE)
+    board_states = [State(0, initial_board)]
+    for idx,this_trans in enumerate(transitions):
+        # Get the indices of the previous and next transitions.
         if idx == 0:
-            board_state = [(t, np.empty_like(raw_boards[0], dtype=Puyo))]
-            board_state[0][1].fill(Puyo.NONE)
+            prev_trans = 0
+            next_trans = transitions[idx+1]
+        elif idx == (len(transitions) - 1):
+            prev_trans = transitions[idx-1]
+            next_trans = len(raw_boards) - 1
         else:
-            lastt = transitions[idx-1]
-            nextt = transitions[idx+1]
-            hasprepop,  prepoplist  = hasPopSequence(lastt,t,board_flickers)
-            haspostpop, postpoplist = hasPopSequence(t,nextt,board_flickers)
-            if hasprepop and haspostpop: break # UPDATE
-            elif hasprepop:  break # UPDATE
-            elif haspostpop: break # UPDATE
-            else:
-                board_state.append( (t, noPopBoardDetermination(board_state[-1][1],
-                                                                raw_boards,
-                                                                (lastt,t,nextt))))
-    return board_state
+            prev_trans = transitions[idx-1]
+            next_trans = transitions[idx+1]
+        # Get whether the previous and next frame windows had pops.
+        prev_pop_sequence = getPopSequence(prev_trans, this_trans, pop_groups)
+        next_pop_sequence = getPopSequence(this_trans, next_trans, pop_groups)
+        print(next_pop_sequence)
+        if not prev_pop_sequence:
+            pass # determine previous puyo placement by -3,+4 majority window about transition
+        if not next_pop_sequence:
+            pass # check for garbage majority in the next window
+        else:
+            pass # generate pop boards by assessing majorities at +7 window about pop frame
+    return board_states
 
 import puyodebug
 import cv2
 
-# Raw classifications are received as a list (raw_clf) of tuples, index is the frame number.
-#   (1) First element is a numpy array reprenting the board. board[row][col] = Puyo
-#   (2) Second element is a tuple of the next Puyo pair.
 def robustClassify(raw_clf):
+    """ Return the board state sequence. Raw classifications are assumed to begin after
+        the first puyo pair is drawn and ends at an arbitrary time (but not long after
+        game loss). Final puyo pair placement during a fatal blow will not be captured.
+    
+        Raw classifications are received as a list of tuples:
+           * Index is the frame number.
+           * First element is a numpy array representing the board. (board[row][col] = puyo)
+           * Second element is a tuple of the next puyo pair.
+    """
+    
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
     pop_groups = findPopGroups(raw_boards)
     transitions = findTransitions(raw_nextpuyo)
-    print(len(transitions))
-    #board_seq = buildBoardSequence(raw_boards,transitions,board_flickers)
-    #for _,board in board_seq:
-    #    img = puyodebug.plotBoardState(board)
-    #    cv2.imshow('',img)
-    #    cv2.waitKey(0)
+    board_seq = buildBoardSequence(raw_boards,transitions,pop_groups)
+    for _,board in board_seq:
+        img = puyodebug.plotBoardState(board)
+        cv2.imshow('',img)
+        cv2.waitKey(0)
     return None
