@@ -176,8 +176,25 @@ def getPuyoMajority(raw_puyo):
     return puyo_count.most_common(1).pop(0)
 
 _BOARD_AT_TRANSITION_MAJORITY_WINDOW = (-3,4)
+
+def garbageAtTransition(prev_board_state, raw_boards, trans, next_trans):
+    """Find garbage majority for open positions about the transition."""
+
+    new_board = np.copy(prev_board_state.board)
+    for (row,col),puyo in np.ndenumerate(prev_board_state.board):
+        if puyo is not Puyo.NONE:
+            continue
+        pos = round((next_trans + trans)/2)
+        raw_boards_segment = raw_boards[trans:trans+pos]
+        raw_puyo_segment = [board[row,col] for board in raw_boards_segment]
+        puyo_type, count = getPuyoMajority(raw_puyo_segment)
+        if (count > (len(raw_puyo_segment)/2)) and (puyo_type is Puyo.GARBAGE):
+            new_board[row,col] = puyo_type
+    return State(trans, new_board)
+
 def boardAtTransition(prev_board_state, raw_boards, trans):
-    """Find puyo color majority for open positions about the transtion."""
+    """Find puyo color majority for open positions about the transition."""
+
     new_board = np.copy(prev_board_state.board)
     for (row,col),puyo in np.ndenumerate(prev_board_state.board):
         if puyo is not Puyo.NONE:
@@ -213,7 +230,7 @@ def buildBoardSequence(raw_boards, transitions, pop_groups):
         prev_pop_sequence = getPopSequence(prev_trans, this_trans, pop_groups)
         next_pop_sequence = getPopSequence(this_trans, next_trans, pop_groups)
         if not next_pop_sequence:
-            pass # check for garbage majority in the next window
+            prev_board_state = garbageAtTransition(prev_board_state, raw_boards, this_trans, next_trans)
         if not prev_pop_sequence:
             this_board_state = boardAtTransition(prev_board_state, raw_boards, this_trans)
             board_states.append(this_board_state)
