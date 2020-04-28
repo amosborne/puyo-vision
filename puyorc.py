@@ -1,4 +1,4 @@
-from collections import defaultdict, Counter, namedtuple
+from collections import Counter, defaultdict, namedtuple
 from scipy.signal import savgol_filter, find_peaks
 from pandas import Series
 import numpy as np
@@ -93,7 +93,7 @@ def findFlickers(raw_boards):
 
     Flicker = namedtuple('Flicker', 'frameno row col puyo_type')
     flickers = []
-    for row,col in np.ndindex(raw_boards.shape):
+    for row,col in np.ndindex(raw_boards[0].shape):
         raw_puyo = [board[row,col] for board in raw_boards]
         for puyo_type in Puyo:
             if puyo_type is Puyo.NONE:
@@ -110,8 +110,7 @@ def clusterFlickers(flickers):
     flickers.sort()
     flicker_groups = [[flickers.pop(0)]]
     for f in flickers:
-        active_group = flicker_groups[-1][-1]
-        active_frame = active_group[0].frameno
+        active_frame = flicker_groups[-1][-1].frameno
         if abs(f.frameno - active_frame) <= _FLICKER_GROUP_FRAME_WINDOW_SIZE:
             flicker_groups[-1].append(f)
         else:
@@ -130,18 +129,24 @@ def clusterFlickers(flickers):
     return pop_groups
 
 def validatePopGroups(pop_groups):
-    return pop_groups # TODO: Check for false positives given loose thresholds.
+    """ TODO: Validate pop groups by color and geometry constraints."""
+    
+    return pop_groups
 
 def findPopGroups(raw_boards):
+    """ Find all pop groups (with their respective frames)."""
+    
     raw_flickers = findFlickers(raw_boards)
     unvalidated_pop_groups = clusterFlickers(raw_flickers)
     validated_pop_groups = validatePopGroups(unvalidated_pop_groups)
     return validated_pop_groups
 
-def transitionList(raw_nextpuyo):
+def findTransitions(raw_nextpuyo):
+    """ Find all frames where the next puyo pair is drawn."""
+    
     both_blank = []
-    for (b1,b2) in raw_nextpuyo:
-        if b1 is Puyo.NONE and b2 is Puyo.NONE:
+    for puyo1,puyo2 in raw_nextpuyo:
+        if puyo1 is Puyo.NONE and puyo2 is Puyo.NONE:
             both_blank.append(True)
         else:
             both_blank.append(False)
@@ -217,7 +222,8 @@ import cv2
 def robustClassify(raw_clf):
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
     pop_groups = findPopGroups(raw_boards)
-    #transitions = transitionList(raw_nextpuyo)
+    transitions = findTransitions(raw_nextpuyo)
+    print(len(transitions))
     #board_seq = buildBoardSequence(raw_boards,transitions,board_flickers)
     #for _,board in board_seq:
     #    img = puyodebug.plotBoardState(board)
