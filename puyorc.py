@@ -176,6 +176,7 @@ def getPuyoMajority(raw_puyo):
     return puyo_count.most_common(1).pop(0)
 
 _BOARD_AT_TRANSITION_MAJORITY_WINDOW = (-3,4)
+_BOARD_AT_POPFLICKER_MAJORITY_WINDOW = (0,8)
 
 def garbageAtTransition(prev_board_state, raw_boards, trans, next_trans):
     """Find garbage majority for open positions about the transition."""
@@ -207,6 +208,46 @@ def boardAtTransition(prev_board_state, raw_boards, trans):
             new_board[row,col] = puyo_type
     return State(trans, new_board)
 
+def executePop(pre_pop_board, beans):
+    post_pop_board = np.empty_like(pre_pop_board)
+    post_pop_board.fill(Puyo.NONE)
+    for col_idx,col in enumerate(pre_pop_board.T):
+        pop_idx = 0
+        for row_idx,puyo in enumerate(col):
+            if Bean(row_idx, col_idx, puyo) in beans:
+                pop_idx += 1
+            else:
+                post_pop_board[row_idx-pop_idx,col_idx] = puyo
+    return post_pop_board
+
+def boardsDuringPopSequence(prev_board_state, raw_boards, pop_sequence):
+    """Return the list of all board states during a pop sequence."""
+
+    pop_board_states = []
+    next_pop_board = np.copy(prev_board_state.board)
+    for frameno,beans in pop_sequence:
+        # Run through the open spots to check for new beans. Important for
+        # both the most recently placed beans plus any that fell out of
+        # the hidden row due to the latest pop.
+        for row,col,puyo_type in beans:
+            if next_pop_board[row,col] is Puyo.NONE:
+                next_pop_board[row,col] = puyo_type
+        for (row,col),puyo in np.ndenumerate(next_pop_board):
+            if puyo is not Puyo.NONE:
+                continue
+            neg, pos = _BOARD_AT_POPFLICKER_MAJORITY_WINDOW
+            raw_boards_segment = raw_boards[frameno+neg:frameno+pos]
+            raw_puyo_segment = [board[row,col] for board in raw_boards_segment]
+            puyo_type, count = getPuyoMajority(raw_puyo_segment)
+            if count > (len(raw_puyo_segment)/2):
+                next_pop_board[row,col] = puyo_type
+        # Append to the list of pop board states.
+        pop_board_states.append(State(frameno, next_pop_board))
+        # Execute the pop to derive the next pop board.
+        next_pop_board = executePop(next_pop_board, beans)
+    pop_board_states.append(State(frameno, next_pop_board))
+    return pop_board_states
+
 def buildBoardSequence(raw_boards, transitions, pop_groups):
     """Build the sequence of boards (with their respective frames)."""
 
@@ -232,10 +273,11 @@ def buildBoardSequence(raw_boards, transitions, pop_groups):
         if not next_pop_sequence:
             prev_board_state = garbageAtTransition(prev_board_state, raw_boards, this_trans, next_trans)
         if not prev_pop_sequence:
-            this_board_state = boardAtTransition(prev_board_state, raw_boards, this_trans)
-            board_states.append(this_board_state)
+            prev_board_state = boardAtTransition(prev_board_state, raw_boards, this_trans)
+            board_states.append(prev_board_state)
         if next_pop_sequence:
-            pass # generate pop boards by assessing majorities at +7 window about pop frame
+            pop_board_states = boardsDuringPopSequence(prev_board_state, raw_boards, next_pop_sequence)
+            board_states += pop_board_states
     return board_states
 
 import puyodebug
