@@ -1,4 +1,4 @@
-from collections import defaultdict, Counter
+from collections import defaultdict, Counter, namedtuple
 from scipy.signal import savgol_filter, find_peaks
 from pandas import Series
 import numpy as np
@@ -44,10 +44,20 @@ is assumed that the first frame is the start of the game and the final frame is 
 end game animation.
 """
 
-_FLICKER_CORRELATION_PEAK_PROMINENCE = 0.2 # NOTE: A perfect flicker is approx. 0.4
-_FLICKER_GROUP_MAX_GAP_SIZE = 15 # NOTE: Flicker kernel is of length 13
+# Threshold for positive identification during flicker correlation; a perfect flicker is
+# approximately 0.4. The threshold is deliberately set lower so that corrupted flickers
+# might still be detected. The set of all flickers found at a particular frame will then
+# be self-validated given constaints on color and geometry inherent to the game.
+_FLICKER_CORRELATION_PEAK_PROMINENCE = 0.2
+
+# The window size used to group flickers into a common frame. The flicker correlation
+# kernel is 13 frames long; the duration of the remaining pop animation is approximately
+# 15 frames long. This value is selected somewhat arbitrarily.
+_FLICKER_GROUP_FRAME_WINDOW_SIZE = 15
 
 def correlateFlicker(raw_puyo, puyo_type):
+    """Correlate the puyo classifications to the flicker animation kernel."""
+    
     # Define the flicker kernels.
     color_kernel = [ 1, 1, 1, 1,-1, 1,-1, 1,-1, 1,-1, 1,-1 ]
     grbge_kernel = [ 1, 1, 1,-1, 1,-1, 1,-1, 1, 0, 1, 1, 0 ]
@@ -55,6 +65,7 @@ def correlateFlicker(raw_puyo, puyo_type):
         unscaled_kernel = grbge_kernel
     elif puyo_type is not Puyo.NONE:
         unscaled_kernel = color_kernel
+
     # Scale the kernel to equally weight the two alternating puyo types.
     wgt_count = Counter(unscaled_kernel)
     hi_weight = 0.5/wgt_count[ 1]
@@ -64,52 +75,68 @@ def correlateFlicker(raw_puyo, puyo_type):
         if   elem ==  1: kernel[k] =  hi_weight
         elif elem == -1: kernel[k] = -lo_weight
         else:            kernel[k] =  0
-    # Compute the correlation, squared.
-    signalhi = np.array([int(x==puyo_type) for x in raw_puyo])
-    signallo = np.array([int(x==Puyo.NONE) for x in raw_puyo])
+
+    # Compute the correlation, squared. The rationale for squaring is
+    # application specific given the alternating character of the kernel.
+    signalhi = np.array([int(puyo==puyo_type) for puyo in raw_puyo])
+    signallo = np.array([int(puyo==Puyo.NONE) for puyo in raw_puyo])
     signal   = np.subtract(signalhi, signallo)
-    jag_corr = Series(np.square(np.correlate(signal, kernel))) # this is a bit of a hack.
+    jag_corr = Series(np.square(np.correlate(signal, kernel)))
+
     # Smooth the output.
-    ave_corr = jag_corr.rolling(len(kernel)).mean()
+    ave_corr = jag_corr.rolling(len(kernel),center=True).mean()
     smt_corr = savgol_filter(ave_corr, len(kernel), 3)
     return     np.nan_to_num(smt_corr, 0)
 
 def findFlickers(raw_boards):
-    flickers = list()
-    for row,col in np.ndindex(raw_boards.shape[1:]):
-        raw_puyo = raw_boards[:,row,col]
+    """Find all puyo flickers that meet a correlation threshold."""
+
+    Flicker = namedtuple('Flicker', 'frameno row col puyo_type')
+    flickers = []
+    for row,col in np.ndindex(raw_boards.shape):
+        raw_puyo = [board[row,col] for board in raw_boards]
         for puyo_type in Puyo:
-            if puyo_type is Puyo.NONE: continue
-            flicker = correlateFlicker(raw_puyo, puyo_type)
-            peaks, _ = find_peaks(flicker, prominence=_FLICKER_CORRELATION_PEAK_PROMINENCE)
-            for pk in peaks:
-                flickers.append((pk,row,col,puyo_type))
+            if puyo_type is Puyo.NONE:
+                continue
+            flicker_corr = correlateFlicker(raw_puyo, puyo_type)
+            corr_peaks,_ = find_peaks(flicker_corr, prominence=_FLICKER_CORRELATION_PEAK_PROMINENCE)
+            for frameno in corr_peaks:
+                flickers.append(Flicker(frameno,row,col,puyo_type))
     return flickers
 
 def clusterFlickers(flickers):
-    flickers.sort(key=lambda f: f[0])
-    flicker_groups = [[flickers[0]]]
-    for f in flickers[1:]:
-        if abs(f[0] - flicker_groups[-1][-1][0]) <= _FLICKER_GROUP_MAX_GAP_SIZE:
+    """Cluster flickers into groups with the same frame number."""
+
+    flickers.sort()
+    flicker_groups = [[flickers.pop(0)]]
+    for f in flickers:
+        active_group = flicker_groups[-1][-1]
+        active_frame = active_group[0].frameno
+        if abs(f.frameno - active_frame) <= _FLICKER_GROUP_FRAME_WINDOW_SIZE:
             flicker_groups[-1].append(f)
         else:
             flicker_groups.append([f])
-    aligned_flickers = defaultdict(list)
-    for group in flicker_groups:
-        frameno = group[0][0]
-        for puyo in group:
-            aligned_flickers[frameno].append(puyo[1:])
-    return aligned_flickers
 
-def validateFlickers(board_flickers):
-    return board_flickers # TODO: Check for false positives given loose thresholds.
+    Puyo = namedtuple('Puyo', 'row col puyo_type')            
+    PopGroup = namedtuple('PopGroup', 'frameno puyos')
+    pop_groups = []
+    for flicker_group in flicker_groups:
+        frameno = flicker_group[0].frameno
+        pop_group = set()
+        for flicker in flicker_group:
+            puyo = Puyo(flicker.row, flicker.col, flicker.puyo_type)
+            pop_group.add(puyo)
+        pop_groups.append(PopGroup(frameno, pop_group))
+    return pop_groups
 
-def boardFlickerList(raw_boards):
-    raw_boards = np.asarray(raw_boards)
+def validatePopGroups(pop_groups):
+    return pop_groups # TODO: Check for false positives given loose thresholds.
+
+def findPopGroups(raw_boards):
     raw_flickers = findFlickers(raw_boards)
-    board_flickers = clusterFlickers(raw_flickers)
-    board_flickers = validateFlickers(board_flickers)
-    return board_flickers # dict[frameno]:[(row,col,puyo)]
+    unvalidated_pop_groups = clusterFlickers(raw_flickers)
+    validated_pop_groups = validatePopGroups(unvalidated_pop_groups)
+    return validated_pop_groups
 
 def transitionList(raw_nextpuyo):
     both_blank = []
@@ -136,8 +163,13 @@ def hasPopSequence(early_frame,later_frame,board_flickers):
     if popsequence: return True, popsequence
     else:           return False, None
 
-_PREVIOUS_PLACEMENT_NEXT_WINDOW_SHARE_THRESHOLD = 0.9 # not clear how well tuned this is.
-    
+_PREV_PLACEMENT_NEXT_WINDOW_SHARE_THRESH = 0.9 # not clear how well tuned this is.
+## This should be different. For each puyo position, get the majority puyo color across
+# both windows. Garbage is always accepted. Otherwise, the puyos are ranked in terms
+# of time spent on the board in their position, and the top two are selected. Hidden row difficulty?
+# The fastest a puyo can settle is 7-10 frames. On a transition, compute the majority puyo color
+# of the past 10 frames.
+# Handle garbage separately. if the next window contain majority garbage in a position, select it.
 def noPopBoardDetermination(prev_board_state, raw_boards, transitions):
     next_board_state = np.copy(prev_board_state)
     lastt,t,nextt = transitions
@@ -152,7 +184,7 @@ def noPopBoardDetermination(prev_board_state, raw_boards, transitions):
             next_board_state[row,col] = prev_color
         elif next_color[0] is not Puyo.NONE:
             share = next_color[1]/(nextt-t)
-            if share > _PREVIOUS_PLACEMENT_NEXT_WINDOW_SHARE_THRESHOLD:
+            if share > _PREV_PLACEMENT_NEXT_WINDOW_SHARE_THRESH:
                 next_board_state[row,col] = next_color[0]
     return next_board_state
 
@@ -184,11 +216,11 @@ import cv2
 #   (2) Second element is a tuple of the next Puyo pair.
 def robustClassify(raw_clf):
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
-    board_flickers = boardFlickerList(raw_boards)
-    transitions = transitionList(raw_nextpuyo)
-    board_seq = buildBoardSequence(raw_boards,transitions,board_flickers)
-    for _,board in board_seq:
-        img = puyodebug.plotBoardState(board)
-        cv2.imshow('',img)
-        cv2.waitKey(0)
+    pop_groups = findPopGroups(raw_boards)
+    #transitions = transitionList(raw_nextpuyo)
+    #board_seq = buildBoardSequence(raw_boards,transitions,board_flickers)
+    #for _,board in board_seq:
+    #    img = puyodebug.plotBoardState(board)
+    #    cv2.imshow('',img)
+    #    cv2.waitKey(0)
     return None
