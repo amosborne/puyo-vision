@@ -4,44 +4,8 @@ from pandas import Series
 import numpy as np
 from puyocv import Puyo
 
-from matplotlib import pyplot as plt
-
 """
 PUYO ROBUST CLASSIFIER
-
-The puyo computer vision module will return a raw classification for each frame of video.
-This module analyzes these raw classifications to robustly produce a sequence of board states
-which correspond to new puyo placements or puyo pop sequences.
-
-The most reliable elements detected by the raw classifications are:
-   1) The ~4 frame 'transition' when the next puyo is drawn.
-   2) The ~10 frame 'flickering' of puyos when undergoing a pop. In fact, pops are a good
-      time to evaluate the entire board state because no puyos are falling or otherwise animating.
-
-Of course even those elements aren't always perfectly detected; animations which overlay or
-otherwise distort the puyos will often result in mis-classifications. Characteristics of the
-game may be further leveraged to be robust to these mis-classifications:
-   1) When the next puyo is drawn, both puyos in the pair should register a change to empty.
-   2) Puyos must pop in groups of like color of 4 or more (and garbage must be adjacent).
-   3) In general, the majority classification over many frames is the correct classification.
-
-When all pops and next puyo transitions are identified, the entire board state sequence can
-be derived by the following steps:
-   1) At any transition if the frames between the prior transition and the next transition
-      contain no pops, determine the majority puyo class in each empty board position for
-      each frame window on either side of the transition and look for changes from empty.
-   2) At any transition if the prior frame window has no pops but the later frame window
-      does, determine the majority puyo class in each empty board position for the frames
-      during the pop flickering. Disambiguate the placement of two puyo pairs by which
-      board position held the final puyo classification for more frames since the previous
-      transition.
-   3) At any transition if both the prior frame window and later frame window has pops,
-      compare the board state between the final pop of the earlier sequence and the first
-      pop of the later sequence (again by using majority classification on empty frames).
-
-Placement frames and pop frames are compiled and returned as the robust classification. It
-is assumed that the first frame is the start of the game and the final frame is prior to any 
-end game animation.
 """
 
 # Threshold for positive identification during flicker correlation; a perfect flicker is
@@ -54,6 +18,12 @@ _FLICKER_CORRELATION_PEAK_PROMINENCE = 0.2
 # kernel is 13 frames long; the duration of the remaining pop animation is approximately
 # 15 frames long. This value is selected somewhat arbitrarily.
 _FLICKER_GROUP_FRAME_WINDOW_SIZE = 15
+
+# Window size for selecting a puyo classification by majority at next puyo transitions
+# and pop sequence flickers. Transition majority selected to minimize interference
+# with garbage clouds and the next frame (puyo still off-screen).
+_BOARD_AT_TRANSITION_MAJORITY_WINDOW = (-3,4)
+_BOARD_AT_POPFLICKER_MAJORITY_WINDOW = (0,8)
 
 # Class factories for self-documentation.
 Bean     = namedtuple('Bean', 'row col puyo_type')
@@ -172,11 +142,10 @@ def getPopSequence(prev_trans,next_trans,pop_groups):
     return pop_sequence
 
 def getPuyoMajority(raw_puyo):
+    """Return the majority puyo classification in a sequence."""
+    
     puyo_count = Counter(raw_puyo)
     return puyo_count.most_common(1).pop(0)
-
-_BOARD_AT_TRANSITION_MAJORITY_WINDOW = (-3,4)
-_BOARD_AT_POPFLICKER_MAJORITY_WINDOW = (0,8)
 
 def garbageAtTransition(prev_board_state, raw_boards, trans, next_trans):
     """Find garbage majority for open positions about the transition."""
@@ -186,7 +155,7 @@ def garbageAtTransition(prev_board_state, raw_boards, trans, next_trans):
         if puyo is not Puyo.NONE:
             continue
         pos = round((next_trans + trans)/2)
-        raw_boards_segment = raw_boards[trans:trans+pos]
+        raw_boards_segment = raw_boards[trans:pos]
         raw_puyo_segment = [board[row,col] for board in raw_boards_segment]
         puyo_type, count = getPuyoMajority(raw_puyo_segment)
         if (count > (len(raw_puyo_segment)/2)) and (puyo_type is Puyo.GARBAGE):
@@ -209,6 +178,8 @@ def boardAtTransition(prev_board_state, raw_boards, trans):
     return State(trans, new_board)
 
 def executePop(pre_pop_board, beans):
+    """Compute the resulting board after the pop of the given beans."""
+    
     post_pop_board = np.empty_like(pre_pop_board)
     post_pop_board.fill(Puyo.NONE)
     for col_idx,col in enumerate(pre_pop_board.T):
@@ -220,7 +191,7 @@ def executePop(pre_pop_board, beans):
                 post_pop_board[row_idx-pop_idx,col_idx] = puyo
     return post_pop_board
 
-def boardsDuringPopSequence(prev_board_state, raw_boards, pop_sequence):
+def boardsDuringPopSequence(prev_board_state, raw_boards, pop_sequence, next_trans):
     """Return the list of all board states during a pop sequence."""
 
     pop_board_states = []
@@ -245,7 +216,7 @@ def boardsDuringPopSequence(prev_board_state, raw_boards, pop_sequence):
         pop_board_states.append(State(frameno, next_pop_board))
         # Execute the pop to derive the next pop board.
         next_pop_board = executePop(next_pop_board, beans)
-    pop_board_states.append(State(frameno, next_pop_board))
+    pop_board_states.append(State(next_trans, next_pop_board))
     return pop_board_states
 
 def buildBoardSequence(raw_boards, transitions, pop_groups):
@@ -276,12 +247,10 @@ def buildBoardSequence(raw_boards, transitions, pop_groups):
             prev_board_state = boardAtTransition(prev_board_state, raw_boards, this_trans)
             board_states.append(prev_board_state)
         if next_pop_sequence:
-            pop_board_states = boardsDuringPopSequence(prev_board_state, raw_boards, next_pop_sequence)
+            pop_board_states = boardsDuringPopSequence(prev_board_state, raw_boards,
+                                                       next_pop_sequence, next_trans)
             board_states += pop_board_states
     return board_states
-
-import puyodebug
-import cv2
 
 def robustClassify(raw_clf):
     """Return the board state sequence. Raw classifications are assumed to begin after
@@ -298,8 +267,4 @@ def robustClassify(raw_clf):
     pop_groups = findPopGroups(raw_boards)
     transitions = findTransitions(raw_nextpuyo)
     board_seq = buildBoardSequence(raw_boards,transitions,pop_groups)
-    for _,board in board_seq:
-        img = puyodebug.plotBoardState(board)
-        cv2.imshow('',img)
-        cv2.waitKey(0)
-    return None
+    return board_seq
