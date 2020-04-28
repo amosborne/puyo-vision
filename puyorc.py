@@ -175,6 +175,21 @@ def getPuyoMajority(raw_puyo):
     puyo_count = Counter(raw_puyo)
     return puyo_count.most_common(1).pop(0)
 
+_BOARD_AT_TRANSITION_MAJORITY_WINDOW = (-3,4)
+def boardAtTransition(prev_board_state, raw_boards, trans):
+    """Find puyo color majority for open positions about the transtion."""
+    new_board = np.copy(prev_board_state.board)
+    for (row,col),puyo in np.ndenumerate(prev_board_state.board):
+        if puyo is not Puyo.NONE:
+            continue
+        neg, pos = _BOARD_AT_TRANSITION_MAJORITY_WINDOW
+        raw_boards_segment = raw_boards[trans+neg:trans+pos]
+        raw_puyo_segment = [board[row,col] for board in raw_boards_segment]
+        puyo_type, count = getPuyoMajority(raw_puyo_segment)
+        if count > (len(raw_puyo_segment)/2):
+            new_board[row,col] = puyo_type
+    return State(trans, new_board)
+
 def buildBoardSequence(raw_boards, transitions, pop_groups):
     """Build the sequence of boards (with their respective frames)."""
 
@@ -183,7 +198,7 @@ def buildBoardSequence(raw_boards, transitions, pop_groups):
     initial_board.fill(Puyo.NONE)
     board_states = [State(0, initial_board)]
     for idx,this_trans in enumerate(transitions):
-        current_board_state = board_states
+        prev_board_state = board_states[-1]
         # Get the indices of the previous and next transitions.
         if idx == 0:
             prev_trans = 0
@@ -194,14 +209,15 @@ def buildBoardSequence(raw_boards, transitions, pop_groups):
         else:
             prev_trans = transitions[idx-1]
             next_trans = transitions[idx+1]
-        # Get whether the previous and next frame windows had pops.
+        # Get whether the previous and next frame windows had pops and process.
         prev_pop_sequence = getPopSequence(prev_trans, this_trans, pop_groups)
         next_pop_sequence = getPopSequence(this_trans, next_trans, pop_groups)
-        if not prev_pop_sequence:
-            pass # determine previous puyo placement by -3,+4 majority window about transition
         if not next_pop_sequence:
             pass # check for garbage majority in the next window
-        else:
+        if not prev_pop_sequence:
+            this_board_state = boardAtTransition(prev_board_state, raw_boards, this_trans)
+            board_states.append(this_board_state)
+        if next_pop_sequence:
             pass # generate pop boards by assessing majorities at +7 window about pop frame
     return board_states
 
