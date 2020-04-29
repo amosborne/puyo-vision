@@ -1,4 +1,4 @@
-from collections import Counter, defaultdict, namedtuple
+from collections import Counter, namedtuple
 from scipy.signal import savgol_filter, find_peaks
 from pandas import Series
 import numpy as np
@@ -261,6 +261,10 @@ def robustClassify(raw_clf):
           * Index is the frame number.
           * First element is a numpy array representing the board. (board[row][col] = puyo)
           * Second element is a tuple of the next puyo pair.
+
+       Board sequence is returned as a list of named tuples:
+          * board_seq[k].frameno
+          * board_seq[k].board
     """
     
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))

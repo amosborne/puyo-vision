@@ -177,18 +177,29 @@ def processClf(clf):
         
     return transitions
 
+#path = "./test_data/MvT_58758_60621/"
 path = "./test_data/MvT_96000_98129/"
 clf = pickle.load(open(path + "clf_list.p","rb"))
 framelist = pickle.load(open(path + "frame_list.p","rb"))
 
 # transitions = processClf(clf)
-# puyodebug.makeMovie(clf,transitions,framelist)
+from puyorc import robustClassify
+clf = clf[3:-80]
+framelist = framelist[3:-80]
+board_seq = robustClassify(clf)
+#print(len(framelist),len(clf))
+puyodebug.makeMovie(framelist,board_seq,clf)
 
-stable_clf = flashStabilize(clf,6)
-#plotClf(clf,row=4,stable_clf=stable_clf)
-plotClf(clf,row=7,stable_clf=stable_clf)
+#for _,board in board_seq:
+#    cv2.imshow('',puyodebug.plotBoardState(board))
+#    cv2.waitKey(0)
+
+
+#stable_clf = flashStabilize(clf,6)
+#plotClf(clf,row=9)
+#plotClf(clf,row=8,stable_clf=stable_clf)
 #plotClf(clf,row=3,stable_clf=stable_clf)
 #plotClf(clf,row=2,stable_clf=stable_clf)
 #plotClf(clf,row=5,stable_clf=stable_clf)
 #plotClf(clf,row=6,stable_clf=stable_clf)
-plt.show()
+#plt.show()

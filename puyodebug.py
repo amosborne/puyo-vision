@@ -79,7 +79,7 @@ def mergeImages(board,overlay):
     merged = merged[:,35:-50]
     return merged
 
-def makeMovie(clf,transitions,framelist):
+def makeMovie(framelist,board_seq,clf):
     # transitions is an array of tuples (frame_no, board_state)
     # boardframes is the raw image of the player board
     # nextframes is the raw images of the players next puyo
@@ -87,9 +87,10 @@ def makeMovie(clf,transitions,framelist):
     tidx = 0
     board_state = plotBoardState(None)
     for idx, (boardframe,nextframe) in enumerate(framelist):
-        if tidx < len(transitions) and idx == transitions[tidx][0]:
-            board_state = plotBoardState(transitions[tidx][1])
+        if tidx < len(board_seq) and idx == board_seq[tidx].frameno:
+            board_state = plotBoardState(board_seq[tidx].board)
             tidx += 1
+            print(tidx,len(board_seq))
         overlay = plotVideoOverlay(clf[idx],boardframe,nextframe)
         merged = mergeImages(board_state,overlay)
 
