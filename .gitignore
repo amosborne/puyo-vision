@@ -1,4 +1,4 @@
-puyo_venv/
+.venv
 __pycache__/
 *.mp4
 dev/
