@@ -14,7 +14,8 @@ import pickle
 # 2) Assumed video: fullscreen 720p
 
 # Path to the SVM training data.
-_TRAINING_DATA_PATH = os.path.join(
+SVM_FILENAME = "svm.svm"
+TRAINING_DATA_PATH = os.path.join(
     os.path.dirname(os.path.abspath(getsourcefile(lambda: 0))), "training_data/"
 )
 
@@ -47,7 +48,7 @@ def loadTrainingData():
     """Create a dictionary of puyo training data."""
 
     train_data_list = []
-    training_files = os.listdir(_TRAINING_DATA_PATH)
+    training_files = os.listdir(TRAINING_DATA_PATH)
     for filename in training_files:
         # Find the files with the appropriate filenames.
         if filename.endswith(".jpg"):
@@ -86,6 +87,10 @@ def readTrainingDataCSV(filename):
 
 def trainClassifier():
     """Train a new group of SVM's for all-vs-one HOG classification."""
+
+    # Check if the SVM already exists.
+    if os.path.exists(TRAINING_DATA_PATH + SVM_FILENAME):
+        return cv2.ml.SVM_load(TRAINING_DATA_PATH + SVM_FILENAME)
 
     # Load the training data.
     train_data_list = loadTrainingData()
@@ -131,6 +136,7 @@ def createSVMClassifier(features):
     svm_features = np.array(svm_features, dtype=np.float32)
     svm_responses = np.array(svm_responses, dtype=np.int32)
     svm.trainAuto(svm_features, cv2.ml.ROW_SAMPLE, svm_responses)
+    svm.save(TRAINING_DATA_PATH + SVM_FILENAME)
     return svm
 
 

@@ -3,3 +3,6 @@ freeze:
 	pigar -i .venv dev -p .tmpreqs --without-referenced-comments
 	tail -n +3 .tmpreqs > requirements.txt
 	rm .tmpreqs
+
+clean:
+	rm ./puyolib/training_data/svm.svm
