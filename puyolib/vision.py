@@ -1,11 +1,8 @@
 import os
 from inspect import getsourcefile
-from copy import deepcopy
-
-
 from csv import reader as csvreader
 from enum import IntEnum, auto
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,9 +18,7 @@ _TRAINING_DATA_PATH = os.path.join(
     os.path.dirname(os.path.abspath(getsourcefile(lambda: 0))), "training_data/"
 )
 
-P1_PIXEL_WINDOW = (109, 585, 185, 443)  # manually tuned
 P1_PIXEL_NEXT_WINDOW = (107, 191, 478, 524)  # manually tuned
-P2_PIXEL_WINDOW = (109, 585, 834, 1094)  # manually tuned
 P2_PIXEL_NEXT_WINDOW = (107, 191, 755, 801)  # manually tuned
 
 SCREEN_RESOLUTION = (720, 1280)  # (height, weidth)
@@ -97,9 +92,9 @@ def trainClassifier():
 
     # Create the HOG operator.
     winSize = (48, 48)
-    blockSize = (12, 12)
-    blockStride = (6, 6)
-    cellSize = (6, 6)
+    blockSize = (16, 16)
+    blockStride = (8, 8)
+    cellSize = (8, 8)
     nbins = 5
     hog = cv2.HOGDescriptor(winSize, blockSize, blockStride, cellSize, nbins)
 
@@ -107,47 +102,30 @@ def trainClassifier():
     top, left1, height, width = P1_BOARD_DIMENSION
     left2 = SCREEN_RESOLUTION[1] - (left1 + width)
     P2_BOARD_DIMENSION = (top, left2, height, width)
-    padding = 0
 
     # Extract the hog features from the training set.
     features = defaultdict(list)
     for img, p1dict, p2dict in train_data_list:
         for puyo_type, pos_list in p1dict.items():
             for pos in pos_list:
-                puyo_img = getPuyoImage(img, P1_BOARD_DIMENSION, pos, winSize, padding)
+                puyo_img = getPuyoImage(img, P1_BOARD_DIMENSION, pos, winSize)
                 features[puyo_type].append(hog.compute(puyo_img))
         for puyo_type, pos_list in p2dict.items():
             for pos in pos_list:
-                puyo_img = getPuyoImage(img, P2_BOARD_DIMENSION, pos, winSize, padding)
+                puyo_img = getPuyoImage(img, P2_BOARD_DIMENSION, pos, winSize)
                 features[puyo_type].append(hog.compute(puyo_img))
 
-    # Create hog classifiers.
-    svm = generateClassifier(features)
-
-    for img, p1dict, p2dict in train_data_list:
-        for puyo_type, pos_list in p1dict.items():
-            for pos in pos_list:
-                puyo_img = getPuyoImage(img, P1_BOARD_DIMENSION, pos, winSize, padding)
-                print(puyo_img.get().shape)
-                cv2.imshow("", puyo_img)
-                feature = np.array(hog.compute(puyo_img), dtype=np.float32)
-                res = svm.predict(np.transpose(feature))
-                print(Puyo(res[1][0]))
-                cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    return None
+    # Return SVM classifier.
+    return createSVMClassifier(features)
 
 
-def generateClassifier(features):
+def createSVMClassifier(features):
     """Return all vs. one hog classifiers for each puyo type."""
 
     svm = cv2.ml.SVM_create()
     svm_features = []
     svm_responses = []
-    # for feature_type, feature_list in features.items():
-    for puyo_type in Puyo:
-        feature_type = puyo_type
-        feature_list = features[feature_type]
+    for feature_type, feature_list in features.items():
         svm_features += feature_list
         svm_responses += [feature_type] * len(feature_list)
     svm_features = np.array(svm_features, dtype=np.float32)
@@ -156,7 +134,7 @@ def generateClassifier(features):
     return svm
 
 
-def getPuyoImage(img, dimension, pos, size, pad):
+def getPuyoImage(img, dimension, pos, size, pad=0):
     """Return the properly sized puyo image given the full frame image."""
 
     top, left, height, width = dimension
@@ -171,6 +149,7 @@ def getPuyoImage(img, dimension, pos, size, pad):
         [puyo_center[1] - size[1] // 2 - pad, puyo_center[1] + size[1] // 2 + pad],
     )
     puyo_img = cv2.cvtColor(puyo_img, cv2.COLOR_BGR2GRAY)
+    puyo_img = puyo_img.get()  # Image retrieved from GPU due to HOG constraints.
     return puyo_img
 
 
