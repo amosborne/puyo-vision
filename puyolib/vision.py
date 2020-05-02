@@ -1,20 +1,11 @@
 import os
 from inspect import getsourcefile
 from csv import reader as csvreader
-from enum import IntEnum, auto
 from collections import defaultdict
 import cv2
 import numpy as np
-
-
-class Puyo(IntEnum):
-    NONE = 0
-    RED = auto()
-    YELLOW = auto()
-    GREEN = auto()
-    BLUE = auto()
-    PURPLE = auto()
-    GARBAGE = auto()
+from puyolib.puyo import Puyo
+import puyolib.debug
 
 
 def enableOCL(b=True):
@@ -233,8 +224,14 @@ P2_NEXT_DIMENSION = bySymmetry(P1_NEXT_DIMENSION, SCREEN_RESOLUTION)
 
 def main():
     enableOCL()
-    frame = cv2.UMat(cv2.imread("./puyolib/training_data/image1.jpg"))
-    board, next_puyos = classifyFrame(frame, 1)
+    frame = cv2.UMat(cv2.imread("./puyolib/training_data/image2.jpg"))
+    clf = classifyFrame(frame, 1)
+    overlay = puyolib.debug.plotVideoOverlay(
+        clf, frame, P1_BOARD_DIMENSION, P1_NEXT_DIMENSION
+    )
+    cv2.imshow("", overlay)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
     return None
 
     # Do an informal test.

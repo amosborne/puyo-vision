@@ -1,7 +1,7 @@
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib import pyplot as plt
 from matplotlib import gridspec
-from puyolib.vision import Puyo
+from puyolib.puyo import Puyo
 import numpy as np
 import cv2
 
@@ -67,11 +67,19 @@ def plotBoardState(board):  # TODO: Add hidden row input and plotting.
     return image
 
 
-def plotVideoOverlay(clf, boardframe, nextframe):
+def getSubImage(frame, dim):
+    top, left, height, width = dim
+    subimg = cv2.UMat(frame, [top, top + height], [left, left + width])
+    subimg = cv2.cvtColor(subimg, cv2.COLOR_BGR2RGB)
+    subimg = np.uint8(subimg.get())
+    return subimg
+
+
+def plotVideoOverlay(clf, frame, board_dim, nextpuyo_dim):
     fig, ax = plt.subplots(figsize=(4, 8), dpi=80)
-    boardframe = cv2.cvtColor(boardframe, cv2.COLOR_BGR2RGB)
+    boardframe = getSubImage(frame, board_dim)
     ax.imshow(boardframe, extent=[0.5, 6.5, 0.5, 12.5])
-    nextframe = cv2.cvtColor(nextframe, cv2.COLOR_BGR2RGB)
+    nextframe = getSubImage(frame, nextpuyo_dim)
     ax.imshow(nextframe, extent=[6.5, 7.5, 10.5, 12.5])
     for row in range(1, 13):
         for col in range(1, 8):
