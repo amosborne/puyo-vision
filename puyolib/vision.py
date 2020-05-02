@@ -1,6 +1,8 @@
+import os
 from inspect import getsourcefile
-from os import listdir
-from os.path import abspath, dirname, join
+from copy import deepcopy
+
+
 from csv import reader as csvreader
 from enum import IntEnum, auto
 from collections import defaultdict, namedtuple
@@ -15,15 +17,17 @@ import pickle
 # 2) Assumed video: fullscreen 720p
 
 # Path to the SVM training data.
-_TRAINING_DATA_PATH = join(dirname(abspath(getsourcefile(lambda: 0))), "training_data/")
+_TRAINING_DATA_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(getsourcefile(lambda: 0))), "training_data/"
+)
 
 P1_PIXEL_WINDOW = (109, 585, 185, 443)  # manually tuned
 P1_PIXEL_NEXT_WINDOW = (107, 191, 478, 524)  # manually tuned
 P2_PIXEL_WINDOW = (109, 585, 834, 1094)  # manually tuned
 P2_PIXEL_NEXT_WINDOW = (107, 191, 755, 801)  # manually tuned
 
-
-TrainData = namedtuple("TrainData", "img, p1dict, p2dict")
+SCREEN_RESOLUTION = (720, 1280)  # (height, weidth)
+P1_BOARD_DIMENSION = (109, 186, 476, 258)  # (top, left, heigh, width)
 
 
 class Puyo(IntEnum):
@@ -48,7 +52,7 @@ def loadTrainingData():
     """Create a dictionary of puyo training data."""
 
     train_data_list = []
-    training_files = listdir(_TRAINING_DATA_PATH)
+    training_files = os.listdir(_TRAINING_DATA_PATH)
     for filename in training_files:
         # Find the files with the appropriate filenames.
         if filename.endswith(".jpg"):
@@ -62,7 +66,7 @@ def loadTrainingData():
         img = cv2.imread(_TRAINING_DATA_PATH + filename)
         img = cv2.UMat(img)
         p1dict, p2dict = readTrainingDataCSV(_TRAINING_DATA_PATH + dataname)
-        train_data_list.append(TrainData(img, p1dict, p2dict))
+        train_data_list.append((img, p1dict, p2dict))
     return train_data_list
 
 
@@ -77,7 +81,7 @@ def readTrainingDataCSV(filename):
             # Data is in (row,col) pairs per player_color.
             dataline = [x for x in filter(None, line)]
             player, color = dataline.pop(0).split("_")
-            dataline = [map(int, x.split(",")) for x in dataline]
+            dataline = [tuple(map(int, x.split(","))) for x in dataline]
             if player == "P1":
                 p1_pos[Puyo[color]] = dataline
             elif player == "P2":
@@ -92,27 +96,82 @@ def trainClassifier():
     train_data_list = loadTrainingData()
 
     # Create the HOG operator.
-    winSize = (64, 64)
-    blockSize = (16, 16)
-    blockStride = (8, 8)
-    cellSize = (8, 8)
+    winSize = (48, 48)
+    blockSize = (12, 12)
+    blockStride = (6, 6)
+    cellSize = (6, 6)
     nbins = 5
     hog = cv2.HOGDescriptor(winSize, blockSize, blockStride, cellSize, nbins)
 
+    # Define the second board dimension symetrically off the first.
+    top, left1, height, width = P1_BOARD_DIMENSION
+    left2 = SCREEN_RESOLUTION[1] - (left1 + width)
+    P2_BOARD_DIMENSION = (top, left2, height, width)
+    padding = 0
+
+    # Extract the hog features from the training set.
+    features = defaultdict(list)
     for img, p1dict, p2dict in train_data_list:
-        cv2.imshow("", img)
-        cv2.waitKey(0)
+        for puyo_type, pos_list in p1dict.items():
+            for pos in pos_list:
+                puyo_img = getPuyoImage(img, P1_BOARD_DIMENSION, pos, winSize, padding)
+                features[puyo_type].append(hog.compute(puyo_img))
+        for puyo_type, pos_list in p2dict.items():
+            for pos in pos_list:
+                puyo_img = getPuyoImage(img, P2_BOARD_DIMENSION, pos, winSize, padding)
+                features[puyo_type].append(hog.compute(puyo_img))
+
+    # Create hog classifiers.
+    svm = generateClassifier(features)
+
+    for img, p1dict, p2dict in train_data_list:
+        for puyo_type, pos_list in p1dict.items():
+            for pos in pos_list:
+                puyo_img = getPuyoImage(img, P1_BOARD_DIMENSION, pos, winSize, padding)
+                print(puyo_img.get().shape)
+                cv2.imshow("", puyo_img)
+                feature = np.array(hog.compute(puyo_img), dtype=np.float32)
+                res = svm.predict(np.transpose(feature))
+                print(Puyo(res[1][0]))
+                cv2.waitKey(0)
     cv2.destroyAllWindows()
     return None
 
 
-def getPuyoImage(image, corners, pos):
-    # sz = PUYO_PIXEL_SIZE // 2
-    # row, col = pos
-    # y = round(corners[1] - ((row - 0.5) * (corners[1] - corners[0]) / 12))
-    # x = round(corners[2] + ((col - 0.5) * (corners[3] - corners[2]) / 6))
-    # subimage = image[y - sz : y + sz, x - sz : x + sz]
-    return None
+def generateClassifier(features):
+    """Return all vs. one hog classifiers for each puyo type."""
+
+    svm = cv2.ml.SVM_create()
+    svm_features = []
+    svm_responses = []
+    # for feature_type, feature_list in features.items():
+    for puyo_type in Puyo:
+        feature_type = puyo_type
+        feature_list = features[feature_type]
+        svm_features += feature_list
+        svm_responses += [feature_type] * len(feature_list)
+    svm_features = np.array(svm_features, dtype=np.float32)
+    svm_responses = np.array(svm_responses, dtype=np.int32)
+    svm.trainAuto(svm_features, cv2.ml.ROW_SAMPLE, svm_responses)
+    return svm
+
+
+def getPuyoImage(img, dimension, pos, size, pad):
+    """Return the properly sized puyo image given the full frame image."""
+
+    top, left, height, width = dimension
+    row, col = pos
+    puyo_center = (
+        round(top + height - (height / 12) * (row - 0.5)),
+        round(left + (width / 6) * (col - 0.5)),
+    )
+    puyo_img = cv2.UMat(
+        img,
+        [puyo_center[0] - size[0] // 2 - pad, puyo_center[0] + size[0] // 2 + pad],
+        [puyo_center[1] - size[1] // 2 - pad, puyo_center[1] + size[1] // 2 + pad],
+    )
+    puyo_img = cv2.cvtColor(puyo_img, cv2.COLOR_BGR2GRAY)
+    return puyo_img
 
 
 def getNextPuyoImage(image, corners, pos):
@@ -271,6 +330,7 @@ def calcShake(thisframe, lastframe, player, prevshake):
 
 
 def main():
+    enableOCL()
     trainClassifier()
     return None
 

@@ -2,7 +2,7 @@ from collections import Counter, namedtuple
 from scipy.signal import savgol_filter, find_peaks
 from pandas import Series
 import numpy as np
-from puyocv import Puyo
+from puyolib.vision import Puyo
 
 """
 PUYO ROBUST CLASSIFIER
