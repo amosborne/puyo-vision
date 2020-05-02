@@ -5,25 +5,6 @@ from enum import IntEnum, auto
 from collections import defaultdict
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-import pickle
-
-# README
-# 1) Assumed  game: Puyo Puyo Champions / Esports
-# 2) Assumed video: fullscreen 720p
-
-# Path to the SVM training data.
-SVM_FILENAME = "svm.svm"
-TRAINING_DATA_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(getsourcefile(lambda: 0))), "training_data/"
-)
-
-P1_PIXEL_NEXT_WINDOW = (107, 191, 478, 524)  # manually tuned
-P2_PIXEL_NEXT_WINDOW = (107, 191, 755, 801)  # manually tuned
-
-SCREEN_RESOLUTION = (720, 1280)  # (height, weidth)
-P1_BOARD_DIMENSION = (109, 186, 476, 258)  # (top, left, heigh, width)
 
 
 class Puyo(IntEnum):
@@ -36,11 +17,11 @@ class Puyo(IntEnum):
     GARBAGE = auto()
 
 
-def enableOCL():
+def enableOCL(b=True):
     """Enables OpenCL usage if a device is available."""
 
     if cv2.ocl.haveOpenCL():
-        cv2.ocl.setUseOpenCL(True)
+        cv2.ocl.setUseOpenCL(b)
     return cv2.ocl.useOpenCL()
 
 
@@ -59,9 +40,9 @@ def loadTrainingData():
         else:
             continue
         # Load the data into a training dictionary.
-        img = cv2.imread(_TRAINING_DATA_PATH + filename)
+        img = cv2.imread(TRAINING_DATA_PATH + filename)
         img = cv2.UMat(img)
-        p1dict, p2dict = readTrainingDataCSV(_TRAINING_DATA_PATH + dataname)
+        p1dict, p2dict = readTrainingDataCSV(TRAINING_DATA_PATH + dataname)
         train_data_list.append((img, p1dict, p2dict))
     return train_data_list
 
@@ -95,37 +76,25 @@ def trainClassifier():
     # Load the training data.
     train_data_list = loadTrainingData()
 
-    # Create the HOG operator.
-    winSize = (48, 48)
-    blockSize = (16, 16)
-    blockStride = (8, 8)
-    cellSize = (8, 8)
-    nbins = 5
-    hog = cv2.HOGDescriptor(winSize, blockSize, blockStride, cellSize, nbins)
-
-    # Define the second board dimension symetrically off the first.
-    top, left1, height, width = P1_BOARD_DIMENSION
-    left2 = SCREEN_RESOLUTION[1] - (left1 + width)
-    P2_BOARD_DIMENSION = (top, left2, height, width)
-
-    # Extract the hog features from the training set.
+    # Extract the hog features from the training set. Training images are
+    # on the main board without any ongoing shake animation.
     features = defaultdict(list)
     for img, p1dict, p2dict in train_data_list:
         for puyo_type, pos_list in p1dict.items():
             for pos in pos_list:
                 puyo_img = getPuyoImage(img, P1_BOARD_DIMENSION, pos, winSize)
-                features[puyo_type].append(hog.compute(puyo_img))
+                features[puyo_type].append(HOG.compute(puyo_img))
         for puyo_type, pos_list in p2dict.items():
             for pos in pos_list:
                 puyo_img = getPuyoImage(img, P2_BOARD_DIMENSION, pos, winSize)
-                features[puyo_type].append(hog.compute(puyo_img))
+                features[puyo_type].append(HOG.compute(puyo_img))
 
     # Return SVM classifier.
     return createSVMClassifier(features)
 
 
 def createSVMClassifier(features):
-    """Return all vs. one hog classifiers for each puyo type."""
+    """Return multiclass SVM classifier covering all puyo types."""
 
     svm = cv2.ml.SVM_create()
     svm_features = []
@@ -140,151 +109,68 @@ def createSVMClassifier(features):
     return svm
 
 
-def getPuyoImage(img, dimension, pos, size, pad=0):
+def getPuyoImage(img, dimension, pos, size, nextpuyo=False):
     """Return the properly sized puyo image given the full frame image."""
 
     top, left, height, width = dimension
     row, col = pos
-    puyo_center = (
-        round(top + height - (height / 12) * (row - 0.5)),
-        round(left + (width / 6) * (col - 0.5)),
-    )
+    if nextpuyo:
+        puyo_center = (
+            round(top + height - (height / 2) * (row - 0.5)),
+            round(left + (width / 1) * (col - 0.5)),
+        )
+    else:
+        puyo_center = (
+            round(top + height - (height / 12) * (row - 0.5)),
+            round(left + (width / 6) * (col - 0.5)),
+        )
     puyo_img = cv2.UMat(
         img,
-        [puyo_center[0] - size[0] // 2 - pad, puyo_center[0] + size[0] // 2 + pad],
-        [puyo_center[1] - size[1] // 2 - pad, puyo_center[1] + size[1] // 2 + pad],
+        [puyo_center[0] - size[0] // 2, puyo_center[0] + size[0] // 2],
+        [puyo_center[1] - size[1] // 2, puyo_center[1] + size[1] // 2],
     )
     puyo_img = cv2.cvtColor(puyo_img, cv2.COLOR_BGR2GRAY)
     puyo_img = puyo_img.get()  # Image retrieved from GPU due to HOG constraints.
     return puyo_img
 
 
-def getNextPuyoImage(image, corners, pos):
-    # sz = PUYO_PIXEL_SIZE // 2
-    # row, col = pos
-    # y = round(corners[1] - ((row - 0.5) * (corners[1] - corners[0]) / 2))
-    # x = round(corners[2] + ((col - 0.5) * (corners[3] - corners[2])))
-    # subimage = image[y - sz : y + sz, x - sz : x + sz]
-    return None
+def predictPuyo(frame, player, pos, nextpuyo=False, shake=0):
+    """Return the classification of the puyo on the board or in the next window."""
+
+    if nextpuyo:
+        if player == 1:
+            dim = P1_NEXT_DIMENSION
+        elif player == 2:
+            dim = P2_NEXT_DIMENSION
+    else:
+        if player == 1:
+            dim = P1_BOARD_DIMENSION
+        elif player == 2:
+            dim = P2_BOARD_DIMENSION
+        dim = shakeAdjust(dim, shake)
+    puyo_img = getPuyoImage(frame, dim, pos, winSize, nextpuyo)
+    feature = HOG.compute(puyo_img)
+    return Puyo(SVM.predict(np.transpose(feature))[1][0])
 
 
-def trainSVM(data):
-    # features = []
-    # responses = []
-    # for puyo, image_list in data.items():
-    #     for image in image_list:
-    #         gimage = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    #         features.append(HOG.compute(gimage))
-    #         responses.append(puyo)
-    # features = np.array(features, dtype=np.float32)
-    # responses = np.array(responses, dtype=np.int32)
-    # svm = cv2.ml.SVM_create()
-    # svm.trainAuto(features, cv2.ml.ROW_SAMPLE, responses)
-    return None
+def classifyFrame(frame, player):
+    """Classify each board position and next window frame for the given player."""
 
-
-# Train a multi-class SVM using HOG with hand-crafted training data.
-SVM = trainSVM(loadTrainingData())
-
-
-def shakeAdjust(window, shake):
-    return (window[0], window[1], window[2] + shake, window[3] + shake)
-
-
-def predictPuyo(image, player, pos, nextpuyo, shake):
-    if player == 1 and not nextpuyo:
-        win = shakeAdjust(P1_PIXEL_WINDOW, shake)
-        puyo = getPuyoImage(image, win, pos)
-    elif player == 2 and not nextpuyo:
-        win = shakeAdjust(P2_PIXEL_WINDOW, shake)
-        puyo = getPuyoImage(image, win, pos)
-    elif player == 1 and nextpuyo:
-        puyo = getNextPuyoImage(image, P1_PIXEL_NEXT_WINDOW, pos)
-    elif player == 2 and nextpuyo:
-        puyo = getNextPuyoImage(image, P2_PIXEL_NEXT_WINDOW, pos)
-    gpuyo = cv2.cvtColor(puyo, cv2.COLOR_BGR2GRAY)
-    # feature = HOG.compute(gpuyo)
-    # feature = np.array(feature, dtype=np.float32)
-    # feature = np.transpose(feature)
-    # result = SVM.predict(feature)
-    # result = Puyo(result[1][0])
-    return None
-
-
-def classifyFrame(frame, player, shake):
-    # Given a frame, will make a classification on every board position and the next puyo for the player.
     board = np.empty([12, 6], dtype=Puyo)
     for row in range(1, 13):
         for col in range(1, 7):
-            res = predictPuyo(frame, player, (row, col), False, shake)
+            res = predictPuyo(frame, player, (row, col), shake=0)  # update
             board[row - 1][col - 1] = res
-    n1 = predictPuyo(frame, player, (1, 1), True, 0)
-    n2 = predictPuyo(frame, player, (2, 1), True, 0)
+    n1 = predictPuyo(frame, player, (1, 1), nextpuyo=True)
+    n2 = predictPuyo(frame, player, (2, 1), nextpuyo=True)
     return (board, (n1, n2))
 
 
-def getSubImage(image, window):
-    subimage = image[window[0] : window[1], window[2] : window[3]]
-    return subimage
+def shakeAdjust(dimension, shake):
+    """Alter the given dimension to horizontal shake."""
 
-
-def getPlayerSubFrames(frame, player, shake):
-    if player == 1:
-        win = shakeAdjust(P1_PIXEL_WINDOW, shake)
-        bimg = getSubImage(frame, win)
-        nimg = getSubImage(frame, P1_PIXEL_NEXT_WINDOW)
-    elif player == 2:
-        win = shakeAdjust(P2_PIXEL_WINDOW, shake)
-        bimg = getSubImage(frame, win)
-        nimg = getSubImage(frame, P2_PIXEL_NEXT_WINDOW)
-    return bimg, nimg
-
-
-def drawClf(frame, player, clf, shake):
-    # Given a frame and a classification, will draw the classification on top of the frame for the player.
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    if player == 1:
-        win = shakeAdjust(P1_PIXEL_WINDOW, shake)
-        bimg = getSubImage(frame, win)
-        nimg = getSubImage(frame, P1_PIXEL_NEXT_WINDOW)
-    elif player == 2:
-        win = shakeAdjust(P2_PIXEL_WINDOW, shake)
-        bimg = getSubImage(frame, win)
-        nimg = getSubImage(frame, P2_PIXEL_NEXT_WINDOW)
-    fig, ax = plt.subplots(figsize=(16, 9), dpi=80)
-    ax.imshow(bimg, extent=[0.5, 6.5, 0.5, 12.5])
-    ax.imshow(nimg, extent=[6.5, 7.5, 10.5, 12.5])
-    for row in range(1, 13):
-        for col in range(1, 8):
-            if col < 7:
-                res = clf[0][row - 1][col - 1]
-            elif col == 7 and (row == 11 or row == 12):
-                res = clf[1][row - 11]
-            else:
-                continue
-            if res == Puyo.RED:
-                clr = "red"
-            elif res == Puyo.YELLOW:
-                clr = "goldenrod"
-            elif res == Puyo.GREEN:
-                clr = "forestgreen"
-            elif res == Puyo.BLUE:
-                clr = "royalblue"
-            elif res == Puyo.PURPLE:
-                clr = "darkviolet"
-            elif res == Puyo.GARBAGE:
-                clr = "grey"
-            elif res == Puyo.NONE:
-                clr = "black"
-            ax.plot(col, row, "o", markersize=12, color=clr)
-    plt.axis("off")
-    canvas = FigureCanvas(fig)
-    canvas.draw()
-    overlay = np.fromstring(canvas.tostring_rgb(), dtype="uint8").reshape(frame.shape)
-    overlay = cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR)
-    overlay = overlay[65:-65, 480:-445]  # magic numbers
-    plt.close(fig)
-    return overlay
+    top, left, height, width = dimension
+    return (top, left + shake, height, width)
 
 
 def expandWindow(win, pix):
@@ -314,9 +200,41 @@ def calcShake(thisframe, lastframe, player, prevshake):
     return shake
 
 
+def bySymmetry(p1_dim, res):
+    """Define the player 2 dimension symmetrically off the first."""
+
+    top, left1, height, width = p1_dim
+    left2 = res[1] - (left1 + width)
+    return (top, left2, height, width)
+
+
+# Path to the SVM training data.
+SVM_FILENAME = "svm.svm"
+TRAINING_DATA_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(getsourcefile(lambda: 0))), "training_data/"
+)
+
+# Create the HOG operator and SVM classifier.
+winSize = (48, 48)
+blockSize = (16, 16)
+blockStride = (8, 8)
+cellSize = (8, 8)
+nbins = 5
+HOG = cv2.HOGDescriptor(winSize, blockSize, blockStride, cellSize, nbins)
+SVM = trainClassifier()
+
+# Define fixed screen pixel dimensions.
+SCREEN_RESOLUTION = (720, 1280)  # (height, weidth)
+P1_BOARD_DIMENSION = (109, 186, 476, 258)  # (top, left, height, width)
+P1_NEXT_DIMENSION = (107, 479, 84, 46)  # (top, left, height, width)
+P2_BOARD_DIMENSION = bySymmetry(P1_BOARD_DIMENSION, SCREEN_RESOLUTION)
+P2_NEXT_DIMENSION = bySymmetry(P1_NEXT_DIMENSION, SCREEN_RESOLUTION)
+
+
 def main():
     enableOCL()
-    trainClassifier()
+    frame = cv2.UMat(cv2.imread("./puyolib/training_data/image1.jpg"))
+    board, next_puyos = classifyFrame(frame, 1)
     return None
 
     # Do an informal test.
