@@ -5,7 +5,6 @@ from collections import defaultdict
 import cv2
 import numpy as np
 from puyolib.puyo import Puyo
-import puyolib.debug
 
 
 def enableOCL(b=True):
@@ -221,23 +220,54 @@ P1_NEXT_DIMENSION = (107, 479, 84, 46)  # (top, left, height, width)
 P2_BOARD_DIMENSION = bySymmetry(P1_BOARD_DIMENSION, SCREEN_RESOLUTION)
 P2_NEXT_DIMENSION = bySymmetry(P1_NEXT_DIMENSION, SCREEN_RESOLUTION)
 
+P1_EDGE_WINDOW = (585, 75, 30, 200)  # (top, left, height, width)
+P2_EDGE_WINDOW = bySymmetry(P1_EDGE_WINDOW, SCREEN_RESOLUTION)
+
+
+import puyolib.debug
+import matplotlib.pyplot as plt
+
+
+def trackBoardEdge(frame, player):
+    """Extract the board edge for shake and end-game detection."""
+
+    if player == 1:
+        dim = P1_EDGE_WINDOW
+        idx = 0
+    elif player == 2:
+        dim = P2_EDGE_WINDOW
+        idx = -1
+    # Apply a 5 pixel square blur after thresholding to near-white.
+    top, left, height, width = dim
+    raw_img = cv2.UMat(frame, [top, top + height], [left, left + width])
+    raw_img = cv2.cvtColor(raw_img, cv2.COLOR_BGR2RGB)
+    gry_img = cv2.cvtColor(raw_img, cv2.COLOR_RGB2GRAY)
+    _, grt_img = cv2.threshold(gry_img, 200, 255, cv2.THRESH_BINARY)
+    blur_img = cv2.blur(grt_img, (5, 5))
+    # Find the average horizonal position of the vertical edge.
+    blur_data = np.divide(blur_img.get(), 255)
+    xs = []
+    for row in blur_data:
+        peaks, _ = find_peaks(row, height=0.25)
+        if len(peaks) == 0:
+            return None
+        else:
+            xs.append(peaks[idx])
+    return int(np.average(xs))
+
 
 def main():
     enableOCL()
-    frame = cv2.UMat(cv2.imread("./puyolib/training_data/image2.jpg"))
-    clf = classifyFrame(frame, 1)
-    overlay = puyolib.debug.plotVideoOverlay(
-        clf, frame, P1_BOARD_DIMENSION, P1_NEXT_DIMENSION
-    )
-    cv2.imshow("", overlay)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    return None
+    # frame = cv2.UMat(cv2.imread("./puyolib/training_data/image2.jpg"))
+    # clf = classifyFrame(frame, 1)
+    # overlay = puyolib.debug.plotVideoOverlay(
+    #     clf, frame, P1_BOARD_DIMENSION, P1_NEXT_DIMENSION
+    # )
 
     # Do an informal test.
-    cap = cv2.VideoCapture("momoken_vs_tom.mp4")
-    end_frame = 98129
-    start_frame = 96000
+    cap = cv2.VideoCapture("./dev/momoken_vs_tom.mp4")
+    end_frame = 98129 + 2000
+    start_frame = 96760  # 96000
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
@@ -253,10 +283,8 @@ def main():
     # cv2.destroyAllWindows()
     # return
 
-    framelist = []
-    clflist = []
+    tracing = []
 
-    shake = 0
     lastframe = None
     while True:
         # If the current frame is the last frame needed, break.
@@ -264,29 +292,35 @@ def main():
             break
         # Read the current frame.
         _, thisframe = cap.read()
-        # If the last frame is not none, calculate the screen shake for player 1.
-        if lastframe is not None:
-            shake = calcShake(thisframe, lastframe, 1, shake)
         # Classify (and draw) the screen with shake accounted for.
-        clf = classifyFrame(thisframe, 1, shake)
-        img = drawClf(thisframe, 1, clf, shake)
+        # clf = classifyFrame(thisframe, 1, shake)
+        # img = drawClf(thisframe, 1, clf, shake)
         # Write the frames and the clf to lists to pickle afterwards.
-        framelist.append(getPlayerSubFrames(thisframe, 1, shake))
-        clflist.append(clf)
+        # framelist.append(getPlayerSubFrames(thisframe, 1, shake))
+        # clflist.append(clf)
+        ret = trackBoardEdge(thisframe, 2)
+        if ret is None:
+            break
+        tracing.append(ret)
 
         # Press 'q' to quit early. Display the overlayed classification.
-        cv2.imshow("", img)
+        # cv2.imshow("", thisframe)
         press = cv2.waitKey(1)
         if press & 0xFF == ord("q"):
+            print(cap.get(cv2.CAP_PROP_POS_FRAMES))
             break
-
         lastframe = thisframe
 
     cap.release()
     cv2.destroyAllWindows()
 
-    pickle.dump(framelist, open("frame_list.p", "wb"))
-    pickle.dump(clflist, open("clf_list.p", "wb"))
+    # ing, ms, bs = tuple(zip(*tracing))
+    # fig, (ax1, ax2) = plt.subplots(2, sharex=True)
+    # ax1.plot(ms)
+    # ax2.plot(bs)
+    plt.subplots()
+    plt.plot(tracing)
+    plt.show()
 
 
 if __name__ == "__main__":
