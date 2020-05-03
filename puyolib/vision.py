@@ -314,21 +314,3 @@ P2_EDGE_OFFSET = 102
 
 P1_START_SCORE = (588, 390, 40, 60)  # (top, left, height, width)
 START_IMAGE = scoreImageProcess(cv2.imread(os.path.join(ROOT_PATH, "start.png")))
-
-
-import pickle
-
-
-def main():
-
-    enableOCL()
-    filepath = "./dev/momoken_vs_tom.mp4"
-    record = processVideo(filepath, ngames=1)
-
-    pickle.dump(record, open("game_record.p", "wb"))
-
-    return None
-
-
-if __name__ == "__main__":
-    main()
