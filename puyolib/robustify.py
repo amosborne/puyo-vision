@@ -173,7 +173,7 @@ def garbageAtTransition(prev_board_state, raw_boards, trans, next_trans):
     for (row, col), puyo in np.ndenumerate(prev_board_state.board):
         if puyo is not Puyo.NONE:
             continue
-        pos = round((next_trans + trans) / 2)
+        pos = round(trans + 3 * (next_trans - trans) / 4)
         raw_boards_seg = raw_boards[trans:pos]
         raw_puyo_seg = [board[row, col] for board in raw_boards_seg]
         puyo_type, count = getPuyoMajority(raw_puyo_seg)

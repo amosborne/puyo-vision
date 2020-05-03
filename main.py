@@ -6,10 +6,10 @@ import cv2
 
 # enableOCL()
 # filepath = "./dev/momoken_vs_tom.mp4"
-# record = processVideo(filepath, ngames=1)
+# record = processVideo(filepath, ngames=2, start_frameno=2239)
 # pickle.dump(record, open("game_record.p", "wb"))
 
-record = pickle.load(open("./dev/test_data/first_game.p", "rb"))
+record = pickle.load(open("./dev/test_data/game_2_3.p", "rb"))
 _, clf1, clf2 = record[0]
 board_seq = robustClassify(clf1)
 

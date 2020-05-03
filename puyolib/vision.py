@@ -256,7 +256,6 @@ def processVideo(filepath, start_frameno=0, end_frameno=None, ngames=None):
                 start_fno = cap.get(cv2.CAP_PROP_POS_FRAMES)
                 clf1_list = []
                 clf2_list = []
-                frame_list = []
 
         # If within a game, process until the end.
         if ingame:
@@ -266,16 +265,13 @@ def processVideo(filepath, start_frameno=0, end_frameno=None, ngames=None):
             if clf1 is None or clf2 is None:
                 ingame = False
                 end_fno = cap.get(cv2.CAP_PROP_POS_FRAMES)
-                game_record.append(
-                    ((start_fno, end_fno), frame_list, clf1_list, clf2_list)
-                )
+                game_record.append(((start_fno, end_fno), clf1_list, clf2_list))
                 # Break early if there was a number of games desired.
                 if ngames is not None and len(game_record) == ngames:
                     break
             else:
                 clf1_list.append(clf1)
                 clf2_list.append(clf2)
-                frame_list.append(cpu_frame)
 
     # Release the video capture stream.
     cap.release()
