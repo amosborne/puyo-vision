@@ -122,7 +122,7 @@ def mergeImages(board, overlay):
     return merged
 
 
-def makeMovie(framelist, player, board_seq, clf):
+def makeMovie(filepath, framelist, player, board_seq, clf):
     # transitions is an array of tuples (frame_no, board_state)
     # boardframes is the raw image of the player board
     # nextframes is the raw images of the players next puyo
@@ -139,7 +139,7 @@ def makeMovie(framelist, player, board_seq, clf):
         if video is None:
             h, w, _ = merged.shape
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            video = cv2.VideoWriter("puyo.mp4", fourcc, 30, (w, h))
+            video = cv2.VideoWriter(filepath + ".mp4", fourcc, 30, (w, h))
 
         video.write(merged)
 

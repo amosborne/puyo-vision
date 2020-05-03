@@ -204,16 +204,16 @@ def checkAdjacencies(beans, pos):
     """Return true if the position is adjacent to the specified beans."""
 
     posr, posc = pos
-    adjacent = False
+    adjacent = set()
     for row, col, puyo_type in beans:
         if (row == posr) and (col == posc - 1):
-            adjacent = True
+            adjacent.add(puyo_type)
         elif (row == posr) and (col == posc + 1):
-            adjacent = True
+            adjacent.add(puyo_type)
         elif (row == posr - 1) and (col == posc):
-            adjacent = True
+            adjacent.add(puyo_type)
         elif (row == posr + 1) and (col == posc):
-            adjacent = True
+            adjacent.add(puyo_type)
         if adjacent:
             break
     return adjacent
@@ -229,8 +229,10 @@ def executePop(pre_pop_board, beans):
         for row_idx, puyo in enumerate(col):
             # Add shim for spotty garbage detection.
             adj_garbage = False
-            if puyo is Puyo.GARBAGE:
-                adj_garbage = checkAdjacencies(beans, (row_idx, col_idx))
+            adj_puyos = checkAdjacencies(beans, (row_idx, col_idx))
+            adj_puyos_non_garbage = adj_puyos - set([Puyo.GARBAGE])
+            if puyo is Puyo.GARBAGE and len(adj_puyos_non_garbage):
+                adj_garbage = True
             if Bean(row_idx, col_idx, puyo) in beans or adj_garbage:
                 pop_idx += 1
             else:

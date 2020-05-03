@@ -223,28 +223,22 @@ def isGameStart(frame):
     return False
 
 
-def processVideo(filepath, start_frameno=0, end_frameno=None, ngames=None):
-    """Return a list of frame-by-frame classifications for a video.
+def processVideo(cap):
+    """Generate a list of frame-by-frame classifications for a video.
     
-    Each element of the output list is a tuple:
-    ( (start_frameno, end_frameno), [player1_clfs], [player2_clfs] )
+    The output record is a tuple (start/end time units seconds):
+    start = (start_frameno, start_time)
+    end = (end_frameno, end_time)
+    ( (start, end), [frames], [player1_clfs], [player2_clfs] )
     """
 
-    # Initialize the video capture stream.
-    cap = cv2.VideoCapture(filepath)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frameno)
-
-    game_record = []
+    fps = 30
     ingame = False
     while True:
-        # If the current frame is the last frame needed, break.
-        if end_frameno is not None and cap.get(cv2.CAP_PROP_POS_FRAMES) == end_frameno:
-            break
-
         # Read the current frame. Break if at the end.
         ret, cpu_frame = cap.read()
         if not ret:
-            break
+            yield None
 
         # Check if the video frame is within a game.
         gpu_frame = cv2.UMat(cpu_frame)
@@ -254,8 +248,10 @@ def processVideo(filepath, start_frameno=0, end_frameno=None, ngames=None):
             else:
                 ingame = True
                 start_fno = cap.get(cv2.CAP_PROP_POS_FRAMES)
+                start_time = round(start_fno / fps)
                 clf1_list = []
                 clf2_list = []
+                frame_list = []
 
         # If within a game, process until the end.
         if ingame:
@@ -265,18 +261,14 @@ def processVideo(filepath, start_frameno=0, end_frameno=None, ngames=None):
             if clf1 is None or clf2 is None:
                 ingame = False
                 end_fno = cap.get(cv2.CAP_PROP_POS_FRAMES)
-                game_record.append(((start_fno, end_fno), clf1_list, clf2_list))
-                # Break early if there was a number of games desired.
-                if ngames is not None and len(game_record) == ngames:
-                    break
+                end_time = round(end_fno / fps)
+                start = (start_fno, start_time)
+                end = (end_fno, end_time)
+                yield ((start, end), frame_list, clf1_list, clf2_list)
             else:
                 clf1_list.append(clf1)
                 clf2_list.append(clf2)
-
-    # Release the video capture stream.
-    cap.release()
-
-    return game_record
+                frame_list.append(cpu_frame)
 
 
 # Path to the SVM training data.
