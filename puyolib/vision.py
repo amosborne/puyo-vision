@@ -4,6 +4,7 @@ from csv import reader as csvreader
 from collections import defaultdict
 import cv2
 import numpy as np
+from scipy.signal import find_peaks
 from puyolib.puyo import Puyo
 
 
@@ -149,7 +150,10 @@ def classifyFrame(frame, player):
     board = np.empty([12, 6], dtype=Puyo)
     for row in range(1, 13):
         for col in range(1, 7):
-            res = predictPuyo(frame, player, (row, col), shake=0)  # update
+            shk = trackBoardEdge(frame, player)
+            if shk is None:
+                return None
+            res = predictPuyo(frame, player, (row, col), shake=shk)
             board[row - 1][col - 1] = res
     n1 = predictPuyo(frame, player, (1, 1), nextpuyo=True)
     n2 = predictPuyo(frame, player, (2, 1), nextpuyo=True)
@@ -163,31 +167,34 @@ def shakeAdjust(dimension, shake):
     return (top, left + shake, height, width)
 
 
-def expandWindow(win, pix):
-    return (win[0], win[1], win[2] - pix, win[3] + pix)
+def trackBoardEdge(frame, player):
+    """Extract the board edge for shake and end-game detection."""
 
-
-def calcShake(thisframe, lastframe, player, prevshake):
     if player == 1:
-        win = shakeAdjust(P1_PIXEL_WINDOW, prevshake)
+        dim = P1_EDGE_WINDOW
+        offset = P1_EDGE_OFFSET
+        idx = 0
     elif player == 2:
-        win = shakeAdjust(P2_PIXEL_WINDOW, prevshake)
-    win = expandWindow(win, -25)  # magic number
-    src1 = getSubImage(thisframe, win)
-    src1 = cv2.cvtColor(src1, cv2.COLOR_BGR2GRAY)
-    src1 = np.float32(src1)
-    src2 = getSubImage(lastframe, win)
-    src2 = cv2.cvtColor(src2, cv2.COLOR_BGR2GRAY)
-    src2 = np.float32(src2)
-    (xadj, _), _ = cv2.phaseCorrelate(src1, src2)
-    xadj = int(xadj)
-    if xadj == 0 and not prevshake == 0:
-        shake = 0
-    else:
-        shake = prevshake - xadj
-    if abs(shake) > 100:  # magic number
-        shake = 0
-    return shake
+        dim = P2_EDGE_WINDOW
+        offset = P2_EDGE_OFFSET
+        idx = -1
+    # Apply a 5 pixel square blur after thresholding to near-white.
+    top, left, height, width = dim
+    raw_img = cv2.UMat(frame, [top, top + height], [left, left + width])
+    raw_img = cv2.cvtColor(raw_img, cv2.COLOR_BGR2RGB)
+    gry_img = cv2.cvtColor(raw_img, cv2.COLOR_RGB2GRAY)
+    _, grt_img = cv2.threshold(gry_img, 200, 255, cv2.THRESH_BINARY)
+    blur_img = cv2.blur(grt_img, (5, 5))
+    # Find the average horizonal position of the vertical edge.
+    blur_data = np.divide(blur_img.get(), 255)
+    xs = []
+    for row in blur_data:
+        peaks, _ = find_peaks(row, height=0.25)
+        if len(peaks) == 0:
+            return None
+        else:
+            xs.append(peaks[idx])
+    return int(np.average(xs)) - offset
 
 
 def bySymmetry(p1_dim, res):
@@ -221,39 +228,12 @@ P2_BOARD_DIMENSION = bySymmetry(P1_BOARD_DIMENSION, SCREEN_RESOLUTION)
 P2_NEXT_DIMENSION = bySymmetry(P1_NEXT_DIMENSION, SCREEN_RESOLUTION)
 
 P1_EDGE_WINDOW = (585, 75, 30, 200)  # (top, left, height, width)
+P1_EDGE_OFFSET = 96
 P2_EDGE_WINDOW = bySymmetry(P1_EDGE_WINDOW, SCREEN_RESOLUTION)
-
+P2_EDGE_OFFSET = 102
 
 import puyolib.debug
 import matplotlib.pyplot as plt
-
-
-def trackBoardEdge(frame, player):
-    """Extract the board edge for shake and end-game detection."""
-
-    if player == 1:
-        dim = P1_EDGE_WINDOW
-        idx = 0
-    elif player == 2:
-        dim = P2_EDGE_WINDOW
-        idx = -1
-    # Apply a 5 pixel square blur after thresholding to near-white.
-    top, left, height, width = dim
-    raw_img = cv2.UMat(frame, [top, top + height], [left, left + width])
-    raw_img = cv2.cvtColor(raw_img, cv2.COLOR_BGR2RGB)
-    gry_img = cv2.cvtColor(raw_img, cv2.COLOR_RGB2GRAY)
-    _, grt_img = cv2.threshold(gry_img, 200, 255, cv2.THRESH_BINARY)
-    blur_img = cv2.blur(grt_img, (5, 5))
-    # Find the average horizonal position of the vertical edge.
-    blur_data = np.divide(blur_img.get(), 255)
-    xs = []
-    for row in blur_data:
-        peaks, _ = find_peaks(row, height=0.25)
-        if len(peaks) == 0:
-            return None
-        else:
-            xs.append(peaks[idx])
-    return int(np.average(xs))
 
 
 def main():
@@ -267,7 +247,7 @@ def main():
     # Do an informal test.
     cap = cv2.VideoCapture("./dev/momoken_vs_tom.mp4")
     end_frame = 98129 + 2000
-    start_frame = 96760  # 96000
+    start_frame = 97450  # 96760  # 96000
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
@@ -293,18 +273,25 @@ def main():
         # Read the current frame.
         _, thisframe = cap.read()
         # Classify (and draw) the screen with shake accounted for.
-        # clf = classifyFrame(thisframe, 1, shake)
+        clf = classifyFrame(thisframe, 2)
+        if clf is None:
+            break
+        else:
+            pass
+            # img = puyolib.debug.plotVideoOverlay(
+            #    clf, thisframe, P2_BOARD_DIMENSION, P2_NEXT_DIMENSION
+            # )
         # img = drawClf(thisframe, 1, clf, shake)
         # Write the frames and the clf to lists to pickle afterwards.
         # framelist.append(getPlayerSubFrames(thisframe, 1, shake))
         # clflist.append(clf)
-        ret = trackBoardEdge(thisframe, 2)
-        if ret is None:
-            break
-        tracing.append(ret)
+        # ret = trackBoardEdge(thisframe, 1)
+        # if ret is None:
+        #    break
+        # tracing.append(ret)
 
         # Press 'q' to quit early. Display the overlayed classification.
-        # cv2.imshow("", thisframe)
+        cv2.imshow("", thisframe)
         press = cv2.waitKey(1)
         if press & 0xFF == ord("q"):
             print(cap.get(cv2.CAP_PROP_POS_FRAMES))
@@ -318,9 +305,9 @@ def main():
     # fig, (ax1, ax2) = plt.subplots(2, sharex=True)
     # ax1.plot(ms)
     # ax2.plot(bs)
-    plt.subplots()
-    plt.plot(tracing)
-    plt.show()
+    # plt.subplots()
+    # plt.plot(tracing)
+    # plt.show()
 
 
 if __name__ == "__main__":
