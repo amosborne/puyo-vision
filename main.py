@@ -46,6 +46,7 @@ def processGameRecords(identifier, records, movie=False):
     if not os.path.isdir(game_record_path):
         os.mkdir(game_record_path)
 
+    pickle_names = []
     for record in records:
         # Unpack the record.
         (start, end), frames, clf1, clf2 = record
@@ -53,30 +54,42 @@ def processGameRecords(identifier, records, movie=False):
         # Pickle the record without the frame images.
         base_filename = os.path.join(game_record_path, str(start_time))
         new_record = ((start, end), clf1, clf2)
-        pickle.dump(new_record, open(base_filename + ".p", "wb"))
+        pickle_name = base_filename + ".p"
+        pickle.dump(new_record, open(pickle_name, "wb"))
+        pickle_names.append(pickle_name)
         # Make movies if requested.
         if movie:
             board_seq1 = robustClassify(clf1)
             makeMovie(base_filename + "_1", frames, 1, board_seq1, clf1)
             board_seq2 = robustClassify(clf2)
             makeMovie(base_filename + "_2", frames, 2, board_seq2, clf2)
+    return pickle_names
+
+
+def reviewGameRecord(filepath, player):
+    """View board by board robust classification result."""
+
+    record = pickle.load(open(filepath, "rb"))
+    _, clf1, clf2 = record
+    if player == 1:
+        clf = clf1
+    elif player == 2:
+        clf = clf2
+    board_seq = robustClassify(clf)
+    for _, board in board_seq:
+        img = plotBoardState(board)
+        cv2.imshow("", img)
+        cv2.waitKey(0)
+    cv2.destroyAllWindows()
     return None
 
 
-vid_filepath = "./dev/momoken_vs_tom.mp4"
-vid_identifier = "testing_results"
+# vid_filepath = "./dev/momoken_vs_tom.mp4"
+# vid_identifier = "testing_results"
 
-records = getGameRecords(vid_filepath, ngames=1)
-processGameRecords(vid_identifier, records, movie=False)
+# records = getGameRecords(vid_filepath, ngames=1)
+# record_paths = processGameRecords(vid_identifier, records, movie=False)
 
-# frame = cv2.imread("./puyolib/training_data/image1.jpg")
-# records = pickle.load(open("./dev/test_data/game_2_3.p", "rb"))
-# new_records = []
-# for idx, record in enumerate(records):
-#     (start_frameno, end_frameno), clf1, clf2 = record
-#     timing = ((start_frameno, idx), (end_frameno, idx))
-#     new_records.append((timing, [frame], clf1, clf2))
-
-# processGameRecords(identifier, new_records, movie=True)
-
-# check_records = pickle.load(open("./results/testing_results/0.p", "rb"))
+rpath = "./results/testing_results/10.p"
+player = 2
+reviewGameRecord(rpath, player)

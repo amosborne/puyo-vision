@@ -195,7 +195,7 @@ def boardAtTransition(prev_board_state, raw_boards, trans):
         raw_puyo_seg = [board[row, col] for board in raw_boards_seg]
         puyo_type, count = getPuyoMajority(raw_puyo_seg)
         more_than_half = count > (len(raw_puyo_seg) / 2)
-        if more_than_half:
+        if more_than_half and puyo_type is not Puyo.GARBAGE:
             new_board[row, col] = puyo_type
     return State(trans, new_board)
 
