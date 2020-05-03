@@ -5,6 +5,7 @@ from collections import defaultdict
 import cv2
 import numpy as np
 from scipy.signal import find_peaks
+from skimage.metrics import structural_similarity as ssim
 from puyolib.puyo import Puyo
 
 
@@ -181,8 +182,7 @@ def trackBoardEdge(frame, player):
     # Apply a 5 pixel square blur after thresholding to near-white.
     top, left, height, width = dim
     raw_img = cv2.UMat(frame, [top, top + height], [left, left + width])
-    raw_img = cv2.cvtColor(raw_img, cv2.COLOR_BGR2RGB)
-    gry_img = cv2.cvtColor(raw_img, cv2.COLOR_RGB2GRAY)
+    gry_img = cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
     _, grt_img = cv2.threshold(gry_img, 200, 255, cv2.THRESH_BINARY)
     blur_img = cv2.blur(grt_img, (5, 5))
     # Find the average horizonal position of the vertical edge.
@@ -205,11 +205,24 @@ def bySymmetry(p1_dim, res):
     return (top, left2, height, width)
 
 
+def scoreImageProcess(img):
+    new_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return cv2.threshold(new_img, 235, 255, cv2.THRESH_BINARY)[1]
+
+
+def isGameStart(frame):
+    top, left, height, width = P1_START_SCORE
+    score_img = cv2.UMat(frame, [top, top + height], [left, left + width])
+    score_img = scoreImageProcess(score_img).get()
+    if ssim(score_img, START_IMAGE) > 0.9:
+        return True
+    return False
+
+
 # Path to the SVM training data.
 SVM_FILENAME = "svm.svm"
-TRAINING_DATA_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(getsourcefile(lambda: 0))), "training_data/"
-)
+ROOT_PATH = os.path.dirname(os.path.abspath(getsourcefile(lambda: 0)))
+TRAINING_DATA_PATH = os.path.join(ROOT_PATH, "training_data/")
 
 # Create the HOG operator and SVM classifier.
 winSize = (48, 48)
@@ -232,38 +245,25 @@ P1_EDGE_OFFSET = 96
 P2_EDGE_WINDOW = bySymmetry(P1_EDGE_WINDOW, SCREEN_RESOLUTION)
 P2_EDGE_OFFSET = 102
 
+P1_START_SCORE = (588, 390, 40, 60)  # (top, left, height, width)
+START_IMAGE = scoreImageProcess(cv2.imread(os.path.join(ROOT_PATH, "start.png")))
+
+
 import puyolib.debug
 import matplotlib.pyplot as plt
 
 
 def main():
-    enableOCL()
-    # frame = cv2.UMat(cv2.imread("./puyolib/training_data/image2.jpg"))
-    # clf = classifyFrame(frame, 1)
-    # overlay = puyolib.debug.plotVideoOverlay(
-    #     clf, frame, P1_BOARD_DIMENSION, P1_NEXT_DIMENSION
-    # )
 
-    # Do an informal test.
+    enableOCL()
+
     cap = cv2.VideoCapture("./dev/momoken_vs_tom.mp4")
-    end_frame = 98129 + 2000
-    start_frame = 97450  # 96760  # 96000
+    end_frame = 99800
+    start_frame = 99450
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-    # while True:
-    #     cur_frame = cap.get(cv2.CAP_PROP_POS_FRAMES)
-    #     _, thisframe = cap.read()
-    #     cv2.imshow('',thisframe)
-    #     press = cv2.waitKey(1)
-    #     if press & 0xFF == ord('q'):
-    #         print(cur_frame)
-    #         break
-    # cap.release()
-    # cv2.destroyAllWindows()
-    # return
-
-    tracing = []
+    s = []
 
     lastframe = None
     while True:
@@ -272,16 +272,18 @@ def main():
             break
         # Read the current frame.
         _, thisframe = cap.read()
+        thisframe = cv2.UMat(thisframe)
         # Classify (and draw) the screen with shake accounted for.
-        clf = classifyFrame(thisframe, 2)
-        if clf is None:
-            break
-        else:
-            pass
-            # img = puyolib.debug.plotVideoOverlay(
-            #    clf, thisframe, P2_BOARD_DIMENSION, P2_NEXT_DIMENSION
-            # )
-        # img = drawClf(thisframe, 1, clf, shake)
+        # clf1 = classifyFrame(thisframe, 1)
+        # clf2 = classifyFrame(thisframe, 2)
+        s.append(isGameStart(thisframe))
+        # if clf is None:
+        #    break
+        # else:
+        #    pass
+        # img = puyolib.debug.plotVideoOverlay(
+        #    clf, thisframe, P2_BOARD_DIMENSION, P2_NEXT_DIMENSION
+        # )
         # Write the frames and the clf to lists to pickle afterwards.
         # framelist.append(getPlayerSubFrames(thisframe, 1, shake))
         # clflist.append(clf)
@@ -296,6 +298,8 @@ def main():
         if press & 0xFF == ord("q"):
             print(cap.get(cv2.CAP_PROP_POS_FRAMES))
             break
+        elif press & 0xFF == ord("k"):
+            print(cap.get(cv2.CAP_PROP_POS_FRAMES))
         lastframe = thisframe
 
     cap.release()
@@ -305,9 +309,9 @@ def main():
     # fig, (ax1, ax2) = plt.subplots(2, sharex=True)
     # ax1.plot(ms)
     # ax2.plot(bs)
-    # plt.subplots()
-    # plt.plot(tracing)
-    # plt.show()
+    plt.subplots()
+    plt.plot(s)
+    plt.show()
 
 
 if __name__ == "__main__":
