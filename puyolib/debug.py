@@ -70,9 +70,9 @@ def plotBoardState(board):  # TODO: Add hidden row input and plotting.
 
 def getSubImage(frame, dim):
     top, left, height, width = dim
-    subimg = cv2.UMat(frame, [top, top + height], [left, left + width])
+    subimg = frame[top : top + height, left : left + width]
     subimg = cv2.cvtColor(subimg, cv2.COLOR_BGR2RGB)
-    subimg = np.uint8(subimg.get())
+    subimg = np.uint8(subimg)
     return subimg
 
 
@@ -127,23 +127,27 @@ def frameGenerator(raw_movie):
 
     vidpath, start_fno, end_fno = raw_movie
     cap = cv2.VideoCapture(vidpath)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_fno)
+    if start_fno > 0:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_fno - 1)
 
     while True:
-        yield cap.read()[1]
-        if cap.get(cv2.CAP_PROP_POS_FRAMES) == end_fno:
+        if cap.get(cv2.CAP_PROP_POS_FRAMES) == end_fno - 1:
             cap.release()
             return
+        else:
+            yield cap.read()[1]
 
 
 def makeMovie(filepath, raw_movie, player, board_seq, clf):
     # transitions is an array of tuples (frame_no, board_state)
     # boardframes is the raw image of the player board
     # nextframes is the raw images of the players next puyo
+    print(len(clf), raw_movie)
     video = None
     tidx = 0
     board_state = plotBoardState(None)
     for idx, frame in enumerate(frameGenerator(raw_movie)):
+        print(idx)
         if tidx < len(board_seq) and idx == board_seq[tidx].frameno:
             board_state = plotBoardState(board_seq[tidx].board)
             tidx += 1

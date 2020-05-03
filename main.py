@@ -12,7 +12,7 @@ def getGameRecords(filepath, start_frameno=0, end_frameno=None, ngames=None):
     """Generate the results of the video processing sub-generator."""
 
     # Initialize video capture.
-    enableOCL()
+    enableOCL(False)
     cap = cv2.VideoCapture(filepath)
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frameno)
 
@@ -71,7 +71,8 @@ def reviewGameRecord(filepath, player):
     """View board by board robust classification result."""
 
     record = pickle.load(open(filepath, "rb"))
-    _, clf1, clf2 = record
+    (start, end), clf1, clf2 = record
+    print("Start Frame: " + str(start[0]) + " (" + str(start[1]) + "s)")
     if player == 1:
         clf = clf1
     elif player == 2:
@@ -88,9 +89,11 @@ def reviewGameRecord(filepath, player):
 vid_filepath = "./dev/momoken_vs_tom.mp4"
 vid_identifier = "testing_results"
 
-for record in getGameRecords(vid_filepath, ngames=2):
-    record_path = processGameRecord(vid_identifier, record, movie=vid_filepath)
+# for record in getGameRecords(vid_filepath, ngames=1, start_frameno=2410):
+#    record_path = processGameRecord(vid_identifier, record, movie=vid_filepath)
 
-# rpath = "./results/testing_results/10.p"
+rpath = "./results/testing_results/87.p"
+record = pickle.load(open(rpath, "rb"))
+processGameRecord(vid_identifier, record, movie=vid_filepath)
 # player = 2
 # reviewGameRecord(rpath, player)
