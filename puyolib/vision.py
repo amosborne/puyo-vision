@@ -229,7 +229,7 @@ def processVideo(cap):
     The output record is a tuple (start/end time units seconds):
     start = (start_frameno, start_time)
     end = (end_frameno, end_time)
-    ( (start, end), [frames], [player1_clfs], [player2_clfs] )
+    ( (start, end), [player1_clfs], [player2_clfs] )
     """
 
     fps = 30
@@ -238,7 +238,7 @@ def processVideo(cap):
         # Read the current frame. Break if at the end.
         ret, cpu_frame = cap.read()
         if not ret:
-            yield None
+            return
 
         # Check if the video frame is within a game.
         gpu_frame = cv2.UMat(cpu_frame)
@@ -251,7 +251,6 @@ def processVideo(cap):
                 start_time = round(start_fno / fps)
                 clf1_list = []
                 clf2_list = []
-                frame_list = []
 
         # If within a game, process until the end.
         if ingame:
@@ -264,11 +263,10 @@ def processVideo(cap):
                 end_time = round(end_fno / fps)
                 start = (start_fno, start_time)
                 end = (end_fno, end_time)
-                yield ((start, end), frame_list, clf1_list, clf2_list)
+                yield ((start, end), clf1_list, clf2_list)
             else:
                 clf1_list.append(clf1)
                 clf2_list.append(clf2)
-                frame_list.append(cpu_frame)
 
 
 # Path to the SVM training data.

@@ -122,14 +122,28 @@ def mergeImages(board, overlay):
     return merged
 
 
-def makeMovie(filepath, framelist, player, board_seq, clf):
+def frameGenerator(raw_movie):
+    """Generate the required movie frames."""
+
+    vidpath, start_fno, end_fno = raw_movie
+    cap = cv2.VideoCapture(vidpath)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_fno)
+
+    while True:
+        yield cap.read()[1]
+        if cap.get(cv2.CAP_PROP_POS_FRAMES) == end_fno:
+            cap.release()
+            return
+
+
+def makeMovie(filepath, raw_movie, player, board_seq, clf):
     # transitions is an array of tuples (frame_no, board_state)
     # boardframes is the raw image of the player board
     # nextframes is the raw images of the players next puyo
     video = None
     tidx = 0
     board_state = plotBoardState(None)
-    for idx, frame in enumerate(framelist):
+    for idx, frame in enumerate(frameGenerator(raw_movie)):
         if tidx < len(board_seq) and idx == board_seq[tidx].frameno:
             board_state = plotBoardState(board_seq[tidx].board)
             tidx += 1
