@@ -242,46 +242,43 @@ def processVideo(filepath, start_frameno=0, end_frameno=None, ngames=None):
             break
 
         # Read the current frame. Break if at the end.
-        ret, frame = cap.read()
+        ret, cpu_frame = cap.read()
         if not ret:
             break
 
-        # DEBUG STATEMENTS
-        # cv2.imshow("", frame)
-        # press = cv2.waitKey(1)
-        # if press & 0xFF == ord("q"):
-        #     break
-
         # Check if the video frame is within a game.
-        frame = cv2.UMat(frame)
+        gpu_frame = cv2.UMat(cpu_frame)
         if not ingame:
-            if not isGameStart(frame):
+            if not isGameStart(gpu_frame):
                 continue
             else:
                 ingame = True
                 start_fno = cap.get(cv2.CAP_PROP_POS_FRAMES)
                 clf1_list = []
                 clf2_list = []
+                frame_list = []
 
         # If within a game, process until the end.
         if ingame:
-            clf1 = classifyFrame(frame, 1)
-            clf2 = classifyFrame(frame, 2)
+            clf1 = classifyFrame(gpu_frame, 1)
+            clf2 = classifyFrame(gpu_frame, 2)
             # Check for end game.
             if clf1 is None or clf2 is None:
                 ingame = False
                 end_fno = cap.get(cv2.CAP_PROP_POS_FRAMES)
-                game_record.append(((start_fno, end_fno), clf1_list, clf2_list))
+                game_record.append(
+                    ((start_fno, end_fno), frame_list, clf1_list, clf2_list)
+                )
                 # Break early if there was a number of games desired.
                 if ngames is not None and len(game_record) == ngames:
                     break
             else:
                 clf1_list.append(clf1)
                 clf2_list.append(clf2)
+                frame_list.append(cpu_frame)
 
     # Release the video capture stream.
     cap.release()
-    # cv2.destroyAllWindows()
 
     return game_record
 

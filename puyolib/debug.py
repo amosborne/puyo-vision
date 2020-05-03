@@ -2,6 +2,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib import pyplot as plt
 from matplotlib import gridspec
 from puyolib.puyo import Puyo
+import puyolib.vision
 import numpy as np
 import cv2
 
@@ -75,12 +76,20 @@ def getSubImage(frame, dim):
     return subimg
 
 
-def plotVideoOverlay(clf, frame, board_dim, nextpuyo_dim):
+def plotVideoOverlay(frame, player, clf):
     fig, ax = plt.subplots(figsize=(4, 8), dpi=80)
+    # Get the appropriate sub-images depending on the player.
+    if player == 1:
+        board_dim = puyolib.vision.P1_BOARD_DIMENSION
+        nextpuyo_dim = puyolib.vision.P1_NEXT_DIMENSION
+    elif player == 2:
+        board_dim = puyolib.vision.P2_BOARD_DIMENSION
+        nextpuyo_dim = puyolib.vision.P2_NEXT_DIMENSION
     boardframe = getSubImage(frame, board_dim)
     ax.imshow(boardframe, extent=[0.5, 6.5, 0.5, 12.5])
     nextframe = getSubImage(frame, nextpuyo_dim)
     ax.imshow(nextframe, extent=[6.5, 7.5, 10.5, 12.5])
+    # Plot colored dots on top to show the classification.
     for row in range(1, 13):
         for col in range(1, 8):
             if col < 7:
@@ -91,6 +100,7 @@ def plotVideoOverlay(clf, frame, board_dim, nextpuyo_dim):
                 continue
             ax.plot(col, row, "o", markersize=12, color=_PUYO_COLORS[res])
     plt.axis("off")
+    # Export in BGR format for OpenCV handling.
     canvas = FigureCanvas(fig)
     canvas.draw()
     overlay = np.fromstring(canvas.tostring_rgb(), dtype="uint8").reshape(
@@ -112,19 +122,18 @@ def mergeImages(board, overlay):
     return merged
 
 
-def makeMovie(framelist, board_seq, clf):
+def makeMovie(framelist, player, board_seq, clf):
     # transitions is an array of tuples (frame_no, board_state)
     # boardframes is the raw image of the player board
     # nextframes is the raw images of the players next puyo
     video = None
     tidx = 0
     board_state = plotBoardState(None)
-    for idx, (boardframe, nextframe) in enumerate(framelist):
+    for idx, frame in enumerate(framelist):
         if tidx < len(board_seq) and idx == board_seq[tidx].frameno:
             board_state = plotBoardState(board_seq[tidx].board)
             tidx += 1
-            print(tidx, len(board_seq))
-        overlay = plotVideoOverlay(clf[idx], boardframe, nextframe)
+        overlay = plotVideoOverlay(frame, player, clf[idx])
         merged = mergeImages(board_state, overlay)
 
         if video is None:

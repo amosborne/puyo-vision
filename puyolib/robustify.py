@@ -200,6 +200,25 @@ def boardAtTransition(prev_board_state, raw_boards, trans):
     return State(trans, new_board)
 
 
+def checkAdjacencies(beans, pos):
+    """Return true if the position is adjacent to the specified beans."""
+
+    posr, posc = pos
+    adjacent = False
+    for row, col, puyo_type in beans:
+        if (row == posr) and (col == posc - 1):
+            adjacent = True
+        elif (row == posr) and (col == posc + 1):
+            adjacent = True
+        elif (row == posr - 1) and (col == posc):
+            adjacent = True
+        elif (row == posr + 1) and (col == posc):
+            adjacent = True
+        if adjacent:
+            break
+    return adjacent
+
+
 def executePop(pre_pop_board, beans):
     """Compute the resulting board after the pop of the given beans."""
 
@@ -208,7 +227,11 @@ def executePop(pre_pop_board, beans):
     for col_idx, col in enumerate(pre_pop_board.T):
         pop_idx = 0
         for row_idx, puyo in enumerate(col):
-            if Bean(row_idx, col_idx, puyo) in beans:
+            # Add shim for spotty garbage detection.
+            adj_garbage = False
+            if puyo is Puyo.GARBAGE:
+                adj_garbage = checkAdjacencies(beans, (row_idx, col_idx))
+            if Bean(row_idx, col_idx, puyo) in beans or adj_garbage:
                 pop_idx += 1
             else:
                 post_pop_board[row_idx - pop_idx, col_idx] = puyo

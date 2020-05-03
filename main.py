@@ -1,7 +1,7 @@
 import pickle
 from puyolib.vision import enableOCL, processVideo
 from puyolib.robustify import robustClassify
-from puyolib.debug import plotBoardState
+from puyolib.debug import plotBoardState, makeMovie
 import cv2
 
 # enableOCL()
@@ -12,6 +12,7 @@ import cv2
 record = pickle.load(open("./dev/test_data/first_game.p", "rb"))
 _, clf1, clf2 = record[0]
 board_seq = robustClassify(clf1)
+
 for _, board in board_seq:
     board_img = plotBoardState(board)
     cv2.imshow("", board_img)
