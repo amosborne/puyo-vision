@@ -206,17 +206,84 @@ def bySymmetry(p1_dim, res):
 
 
 def scoreImageProcess(img):
+    """Turn the score to grayscale and threshold."""
+
     new_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return cv2.threshold(new_img, 235, 255, cv2.THRESH_BINARY)[1]
 
 
 def isGameStart(frame):
+    """Identify the beginning of a game using SSIM."""
+
     top, left, height, width = P1_START_SCORE
     score_img = cv2.UMat(frame, [top, top + height], [left, left + width])
     score_img = scoreImageProcess(score_img).get()
-    if ssim(score_img, START_IMAGE) > 0.9:
+    if ssim(score_img, START_IMAGE) > 0.75:
         return True
     return False
+
+
+def processVideo(filepath, start_frameno=0, end_frameno=None, ngames=None):
+    """Return a list of frame-by-frame classifications for a video.
+    
+    Each element of the output list is a tuple:
+    ( (start_frameno, end_frameno), [player1_clfs], [player2_clfs] )
+    """
+
+    # Initialize the video capture stream.
+    cap = cv2.VideoCapture(filepath)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frameno)
+
+    game_record = []
+    ingame = False
+    while True:
+        # If the current frame is the last frame needed, break.
+        if end_frameno is not None and cap.get(cv2.CAP_PROP_POS_FRAMES) == end_frameno:
+            break
+
+        # Read the current frame. Break if at the end.
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # DEBUG STATEMENTS
+        # cv2.imshow("", frame)
+        # press = cv2.waitKey(1)
+        # if press & 0xFF == ord("q"):
+        #     break
+
+        # Check if the video frame is within a game.
+        frame = cv2.UMat(frame)
+        if not ingame:
+            if not isGameStart(frame):
+                continue
+            else:
+                ingame = True
+                start_fno = cap.get(cv2.CAP_PROP_POS_FRAMES)
+                clf1_list = []
+                clf2_list = []
+
+        # If within a game, process until the end.
+        if ingame:
+            clf1 = classifyFrame(frame, 1)
+            clf2 = classifyFrame(frame, 2)
+            # Check for end game.
+            if clf1 is None or clf2 is None:
+                ingame = False
+                end_fno = cap.get(cv2.CAP_PROP_POS_FRAMES)
+                game_record.append(((start_fno, end_fno), clf1_list, clf2_list))
+                # Break early if there was a number of games desired.
+                if ngames is not None and len(game_record) == ngames:
+                    break
+            else:
+                clf1_list.append(clf1)
+                clf2_list.append(clf2)
+
+    # Release the video capture stream.
+    cap.release()
+    # cv2.destroyAllWindows()
+
+    return game_record
 
 
 # Path to the SVM training data.
@@ -249,69 +316,18 @@ P1_START_SCORE = (588, 390, 40, 60)  # (top, left, height, width)
 START_IMAGE = scoreImageProcess(cv2.imread(os.path.join(ROOT_PATH, "start.png")))
 
 
-import puyolib.debug
-import matplotlib.pyplot as plt
+import pickle
 
 
 def main():
 
     enableOCL()
+    filepath = "./dev/momoken_vs_tom.mp4"
+    record = processVideo(filepath, ngames=1)
 
-    cap = cv2.VideoCapture("./dev/momoken_vs_tom.mp4")
-    end_frame = 99800
-    start_frame = 99450
+    pickle.dump(record, open("game_record.p", "wb"))
 
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-
-    s = []
-
-    lastframe = None
-    while True:
-        # If the current frame is the last frame needed, break.
-        if cap.get(cv2.CAP_PROP_POS_FRAMES) == end_frame:
-            break
-        # Read the current frame.
-        _, thisframe = cap.read()
-        thisframe = cv2.UMat(thisframe)
-        # Classify (and draw) the screen with shake accounted for.
-        # clf1 = classifyFrame(thisframe, 1)
-        # clf2 = classifyFrame(thisframe, 2)
-        s.append(isGameStart(thisframe))
-        # if clf is None:
-        #    break
-        # else:
-        #    pass
-        # img = puyolib.debug.plotVideoOverlay(
-        #    clf, thisframe, P2_BOARD_DIMENSION, P2_NEXT_DIMENSION
-        # )
-        # Write the frames and the clf to lists to pickle afterwards.
-        # framelist.append(getPlayerSubFrames(thisframe, 1, shake))
-        # clflist.append(clf)
-        # ret = trackBoardEdge(thisframe, 1)
-        # if ret is None:
-        #    break
-        # tracing.append(ret)
-
-        # Press 'q' to quit early. Display the overlayed classification.
-        cv2.imshow("", thisframe)
-        press = cv2.waitKey(1)
-        if press & 0xFF == ord("q"):
-            print(cap.get(cv2.CAP_PROP_POS_FRAMES))
-            break
-        elif press & 0xFF == ord("k"):
-            print(cap.get(cv2.CAP_PROP_POS_FRAMES))
-        lastframe = thisframe
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-    # ing, ms, bs = tuple(zip(*tracing))
-    # fig, (ax1, ax2) = plt.subplots(2, sharex=True)
-    # ax1.plot(ms)
-    # ax2.plot(bs)
-    plt.subplots()
-    plt.plot(s)
-    plt.show()
+    return None
 
 
 if __name__ == "__main__":
