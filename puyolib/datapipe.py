@@ -26,32 +26,32 @@ def processVideo(src_filepath, start_time, end_time):
         chunkVideo(src_filepath, tmp_file, start, end)
         video_chunk_filepaths.append(tmp_file)
 
-    # Spawn the parallel processors and output queues.
+    # Spawn the parallel processors and output queue.
     frame_processors = []
-    data_queues = []
+    data_queue = mp.Queue(maxsize=256)
     for path in video_chunk_filepaths:
-        data_queue = mp.Queue(maxsize=512)
         args = (path, data_queue)
         frame_processors.append(
             mp.Process(target=parallelProcessVideo, args=args, daemon=True)
         )
-        data_queues.append(data_queue)
     for proc in frame_processors:
         proc.start()
 
     # Loop until processing is complete.
     data_compiled = []
-    queue_complete = [False] * len(data_queues)
-    while not any(queue_complete):
-        for idx, dq in enumerate(data_queues):
-            if dq.empty() or queue_complete[idx]:
-                continue
-            result = dq.get()
-            if result is None:
-                queue_complete[idx] = True
-                dq.close()
-            else:
-                data_compiled.append(result)
+    queue_complete = False
+    sentinel_count = 0
+    while not queue_complete:
+        if data_queue.empty():
+            continue
+        result = data_queue.get()
+        if result is None:
+            sentinel_count += 1
+            if sentinel_count == len(frame_processors):
+                queue_complete = True
+                data_queue.close()
+        else:
+            data_compiled.append(result)
 
     for proc in frame_processors:
         proc.join()
