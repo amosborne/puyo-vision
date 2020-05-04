@@ -148,12 +148,12 @@ def predictPuyo(frame, player, pos, nextpuyo=False, shake=0):
 def classifyFrame(frame, player):
     """Classify each board position and next window frame for the given player."""
 
+    shk = trackBoardEdge(frame, player)
+    if shk is None:
+        return None
     board = np.empty([12, 6], dtype=Puyo)
     for row in range(1, 13):
         for col in range(1, 7):
-            shk = trackBoardEdge(frame, player)
-            if shk is None:
-                return None
             res = predictPuyo(frame, player, (row, col), shake=shk)
             board[row - 1][col - 1] = res
     n1 = predictPuyo(frame, player, (1, 1), nextpuyo=True)
@@ -221,6 +221,19 @@ def isGameStart(frame):
     if ssim(score_img, START_IMAGE) > 0.75:
         return True
     return False
+
+
+def processFrame(frame):
+    """Return the frame classification."""
+
+    frame = cv2.UMat(frame)
+    game_start = isGameStart(frame)
+    clf1 = classifyFrame(frame, 1)
+    if clf1 is None:
+        clf2 = None
+    else:
+        clf2 = classifyFrame(frame, 2)
+    return (game_start, clf1, clf2)
 
 
 def processVideo(cap):

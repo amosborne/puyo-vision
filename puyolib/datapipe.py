@@ -1,10 +1,11 @@
 import multiprocessing as mp
 import subprocess
-import cv2
-import timeit
-import numpy as np
 import os
+import cv2
+import time
+from puyolib.vision import processFrame
 
+import timeit
 
 VIDEO_FILE = "./dev/momoken_vs_tom2.mp4"
 VIDEO_CHUNK_DEST = ".tmp/"
@@ -25,11 +26,11 @@ def processVideo(src_filepath, start_time, end_time):
         chunkVideo(src_filepath, tmp_file, start, end)
         video_chunk_filepaths.append(tmp_file)
 
-    # Spawn the parallel processors and output queue to analyze each video chunk.
+    # Spawn the parallel processors and output queues.
     frame_processors = []
     data_queues = []
     for path in video_chunk_filepaths:
-        data_queue = mp.Queue(maxsize=10000)
+        data_queue = mp.Queue(maxsize=512)
         args = (path, data_queue)
         frame_processors.append(
             mp.Process(target=parallelProcessVideo, args=args, daemon=True)
@@ -38,24 +39,23 @@ def processVideo(src_filepath, start_time, end_time):
     for proc in frame_processors:
         proc.start()
 
-    # Loop until complete processing is complete.
-    incomplete = True
-    while incomplete:
-        incomplete = any([proc.is_alive() for proc in frame_processors])
-
-    # Loop through queues to collect data.
+    # Loop until processing is complete.
     data_compiled = []
-    incomplete = True
-    while incomplete:
-        for dq in data_queues:
-            data_compiled.append(dq.get_nowait())
-        incomplete = any([not dq.empty() for dq in data_queues])
+    queue_complete = [False] * len(data_queues)
+    while not any(queue_complete):
+        for idx, dq in enumerate(data_queues):
+            if dq.empty() or queue_complete[idx]:
+                continue
+            result = dq.get()
+            if result is None:
+                queue_complete[idx] = True
+                dq.close()
+            else:
+                data_compiled.append(result)
 
-    # Tear down.
     for proc in frame_processors:
+        proc.join()
         proc.close()
-    for dq in data_queues:
-        dq.close()
 
     return None  # ?
 
@@ -68,13 +68,11 @@ def parallelProcessVideo(src_filepath, data_queue):
         ret, frame = cap.read()
         if not ret:
             break
-        # Process the frame.
-        for _ in range(0, 10):
-            frame = cv2.blur(frame, (5, 5))
-        result = np.amax(frame)
+        result = processFrame(frame)
         data_queue.put(result)
-    # Release and return.
+    # Release and return None as a sentinel.
     cap.release()
+    data_queue.put(None)
 
 
 def chunkVideo(src_filepath, dest_filepath, start_time, end_time):
