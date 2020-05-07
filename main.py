@@ -1,5 +1,5 @@
 import pickle
-from puyolib.vision import enableOCL, processVideo
+from puyolib.vision import gameClassifier
 from puyolib.robustify import robustClassify
 from puyolib.debug import plotBoardState, makeMovie
 import cv2
@@ -47,23 +47,19 @@ def processGameRecord(identifier, record, movie=""):
     if not os.path.isdir(game_record_path):
         os.mkdir(game_record_path)
 
-    # Unpack the record.
-    (start, end), clf1, clf2 = record
-    _, start_time = start
     # Pickle the record without the frame images.
-    base_filename = os.path.join(game_record_path, str(start_time))
-    new_record = ((start, end), clf1, clf2)
+    base_filename = os.path.join(game_record_path, record[0][0])
     pickle_name = base_filename + ".p"
-    pickle.dump(new_record, open(pickle_name, "wb"))
+    pickle.dump(record, open(pickle_name, "wb"))
     # Make movies if requested.
-    if movie:
-        raw_movie = (movie, start[0], end[0])
-        board_seq1 = robustClassify(clf1)
-        makeMovie(base_filename + "_1", raw_movie, 1, board_seq1, clf1)
-        print("    Player 1 movie complete.")
-        board_seq2 = robustClassify(clf2)
-        makeMovie(base_filename + "_2", raw_movie, 2, board_seq2, clf2)
-        print("    Player 2 movie complete.")
+    # if movie:
+    #     raw_movie = (movie, start[0], end[0])
+    #     board_seq1 = robustClassify(clf1)
+    #     makeMovie(base_filename + "_1", raw_movie, 1, board_seq1, clf1)
+    #     print("    Player 1 movie complete.")
+    #     board_seq2 = robustClassify(clf2)
+    #     makeMovie(base_filename + "_2", raw_movie, 2, board_seq2, clf2)
+    #     print("    Player 2 movie complete.")
     return pickle_name
 
 
@@ -72,7 +68,7 @@ def reviewGameRecord(filepath, player):
 
     record = pickle.load(open(filepath, "rb"))
     (start, end), clf1, clf2 = record
-    print("Start Frame: " + str(start[0]) + " (" + str(start[1]) + "s)")
+    # print("Start Frame: " + str(start[0]) + " (" + str(start[1]) + "s)")
     if player == 1:
         clf = clf1
     elif player == 2:
@@ -86,14 +82,14 @@ def reviewGameRecord(filepath, player):
     return None
 
 
-vid_filepath = "./dev/momoken_vs_tom.mp4"
+vid_filepath = ".tmp/momoken_vs_tom2.mp4"
 vid_identifier = "testing_results"
 
-# for record in getGameRecords(vid_filepath, ngames=1, start_frameno=2410):
-#    record_path = processGameRecord(vid_identifier, record, movie=vid_filepath)
+for record in gameClassifier(vid_filepath, ngames=10, start="00:00:00"):
+    record_path = processGameRecord(vid_identifier, record)
 
-rpath = "./results/testing_results/87.p"
-record = pickle.load(open(rpath, "rb"))
-processGameRecord(vid_identifier, record, movie=vid_filepath)
-# player = 2
+# rpath = "./results/testing_results/0:00:10.p"
+# record = pickle.load(open(rpath, "rb"))
+# processGameRecord(vid_identifier, record, movie=vid_filepath)
+# player = 1
 # reviewGameRecord(rpath, player)

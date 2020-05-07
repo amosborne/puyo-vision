@@ -6,6 +6,9 @@ import cv2
 import numpy as np
 from scipy.signal import find_peaks
 from skimage.metrics import structural_similarity as ssim
+from psutil import cpu_count
+import multiprocessing as mp
+from datetime import timedelta
 from puyolib.puyo import Puyo
 
 
@@ -230,10 +233,86 @@ def processFrame(frame):
     game_start = isGameStart(frame)
     clf1 = classifyFrame(frame, 1)
     if clf1 is None:
-        clf2 = None
-    else:
-        clf2 = classifyFrame(frame, 2)
+        return (game_start, None, None)
+    clf2 = classifyFrame(frame, 2)
+    if clf2 is None:
+        return (game_start, None, None)
     return (game_start, clf1, clf2)
+
+
+def frameGenerator(cap):
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            return
+        yield frame
+
+
+def time2Frame(time):
+    time = tuple(map(int, time.split(":")))
+    frame = (time[0] * 60 * 60 + time[1] * 60 + time[2]) * VIDEO_FPS
+    return frame
+
+
+def frame2Time(frame):
+    seconds = frame // VIDEO_FPS
+    return str(timedelta(seconds=seconds))
+
+
+def gameClassifier(src, start="00:00:00", end=None, ngames=None, opencl=False):
+    """Generator of game classification records."""
+
+    # Initialize the openCV video capture.
+    enableOCL(opencl)
+    cap = cv2.VideoCapture(src)
+    start_frame = time2Frame(start)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+    # Initialize some stop generating triggers.
+    if end is not None:
+        end_frame = time2Frame(end)
+        frame_limit = end_frame - start_frame
+    frame_count = 0
+    game_count = 0
+    in_game = False
+    clf1_list = []
+    clf2_list = []
+
+    # Process the video in parallel with several processors.
+    pool = mp.Pool(CPU_COUNT)
+    for frame_data in pool.imap(processFrame, frameGenerator(cap)):
+        game_start, clf1, clf2 = frame_data
+        frame_count += 1
+
+        # Check if the end time is reached.
+        if end is not None and frame_count == frame_limit:
+            break
+
+        # Check for game start if not already in a game.
+        if not in_game:
+            if not game_start:
+                continue
+            else:
+                in_game = True
+                start_time = frame2Time(start_frame + frame_count)
+
+        # Check for end of game or otherwise append to the record.
+        if clf1 is None or clf2 is None:
+            end_time = frame2Time(start_frame + frame_count)
+            yield ((start_time, end_time), clf1_list, clf2_list)
+            in_game = False
+            clf1_list = []
+            clf2_list = []
+            game_count += 1
+            if ngames is not None and ngames == game_count:
+                break
+        else:
+            clf1_list.append(clf1)
+            clf2_list.append(clf2)
+
+    # Release the pool and the video captures.
+    pool.terminate()
+    cap.release()
 
 
 def processVideo(cap):
@@ -310,3 +389,5 @@ P2_EDGE_OFFSET = 102
 
 P1_START_SCORE = (588, 390, 40, 60)  # (top, left, height, width)
 START_IMAGE = scoreImageProcess(cv2.imread(os.path.join(ROOT_PATH, "start.png")))
+VIDEO_FPS = 30
+CPU_COUNT = cpu_count(False) - 1
