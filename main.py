@@ -1,37 +1,11 @@
-import pickle
 from puyolib.vision import gameClassifier
 from puyolib.robustify import robustClassify
 from puyolib.debug import plotBoardState, makeMovie
+import pickle
 import cv2
 import os
 
 RECORD_PATH = "results/"
-
-
-def getGameRecords(filepath, start_frameno=0, end_frameno=None, ngames=None):
-    """Generate the results of the video processing sub-generator."""
-
-    # Initialize video capture.
-    enableOCL(False)
-    cap = cv2.VideoCapture(filepath)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frameno)
-
-    count = 0
-    # Retrieve game records from the video.
-    for record in processVideo(cap):
-        count += 1
-        if ngames is not None:
-            print("Game " + str(count) + " of " + str(ngames) + " processed.")
-        yield record
-        record_end_frameno = record[0][1]
-        if end_frameno is not None and record_end_frameno >= end_frameno:
-            return
-        elif ngames is not None and count == ngames:
-            return
-
-    # Release video capture and return.
-    cap.release()
-    return
 
 
 def processGameRecord(identifier, record, movie=""):
@@ -85,7 +59,7 @@ def reviewGameRecord(filepath, player):
 vid_filepath = ".tmp/momoken_vs_tom2.mp4"
 vid_identifier = "testing_results"
 
-for record in gameClassifier(vid_filepath, ngames=10, start="00:00:00"):
+for record in gameClassifier(vid_filepath, ngames=1, start="00:00:00"):
     record_path = processGameRecord(vid_identifier, record)
 
 # rpath = "./results/testing_results/0:00:10.p"

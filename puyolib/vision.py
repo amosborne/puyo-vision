@@ -315,52 +315,6 @@ def gameClassifier(src, start="00:00:00", end=None, ngames=None, opencl=False):
     cap.release()
 
 
-def processVideo(cap):
-    """Generate a list of frame-by-frame classifications for a video.
-    
-    The output record is a tuple (start/end time units seconds):
-    start = (start_frameno, start_time)
-    end = (end_frameno, end_time)
-    ( (start, end), [player1_clfs], [player2_clfs] )
-    """
-
-    fps = 30
-    ingame = False
-    while True:
-        # Read the current frame. Break if at the end.
-        ret, cpu_frame = cap.read()
-        if not ret:
-            return
-
-        # Check if the video frame is within a game.
-        gpu_frame = cv2.UMat(cpu_frame)
-        if not ingame:
-            if not isGameStart(gpu_frame):
-                continue
-            else:
-                ingame = True
-                start_fno = cap.get(cv2.CAP_PROP_POS_FRAMES)
-                start_time = round(start_fno / fps)
-                clf1_list = []
-                clf2_list = []
-
-        # If within a game, process until the end.
-        if ingame:
-            clf1 = classifyFrame(gpu_frame, 1)
-            clf2 = classifyFrame(gpu_frame, 2)
-            # Check for end game.
-            if clf1 is None or clf2 is None:
-                ingame = False
-                end_fno = cap.get(cv2.CAP_PROP_POS_FRAMES)
-                end_time = round(end_fno / fps)
-                start = (start_fno, start_time)
-                end = (end_fno, end_time)
-                yield ((start, end), clf1_list, clf2_list)
-            else:
-                clf1_list.append(clf1)
-                clf2_list.append(clf2)
-
-
 # Path to the SVM training data.
 SVM_FILENAME = "svm.svm"
 ROOT_PATH = os.path.dirname(os.path.abspath(getsourcefile(lambda: 0)))
