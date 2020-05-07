@@ -294,12 +294,17 @@ def gameClassifier(src, start="00:00:00", end=None, ngames=None, opencl=False):
                 continue
             else:
                 in_game = True
-                start_time = frame2Time(start_frame + frame_count)
+                game_start_frame = start_frame + frame_count - 1
+                game_start_time = frame2Time(game_start_frame)
 
         # Check for end of game or otherwise append to the record.
         if clf1 is None or clf2 is None:
-            end_time = frame2Time(start_frame + frame_count)
-            yield ((start_time, end_time), clf1_list, clf2_list)
+            game_end_time = frame2Time(start_frame + frame_count - 1)
+            yield (
+                (game_start_time, game_end_time, game_start_frame),
+                clf1_list,
+                clf2_list,
+            )
             in_game = False
             clf1_list = []
             clf2_list = []

@@ -8,33 +8,34 @@ import os
 RECORD_PATH = "results/"
 
 
-def processGameRecord(identifier, record, movie=""):
-    """Save to file the results of processing the game record.
-
-    Processing currently includes:
-        1. Pickling the record for future reference.
-        2. Making a movie of both players in the record.
-    """
+def pickleGameRecord(src_id, record):
+    """Save to file the results of processing the game record."""
 
     # Create the folder to store these records if necessary.
-    game_record_path = os.path.join(RECORD_PATH, identifier)
+    game_record_path = os.path.join(RECORD_PATH, src_id)
     if not os.path.isdir(game_record_path):
         os.mkdir(game_record_path)
 
-    # Pickle the record without the frame images.
-    base_filename = os.path.join(game_record_path, record[0][0])
-    pickle_name = base_filename + ".p"
-    pickle.dump(record, open(pickle_name, "wb"))
-    # Make movies if requested.
-    # if movie:
-    #     raw_movie = (movie, start[0], end[0])
-    #     board_seq1 = robustClassify(clf1)
-    #     makeMovie(base_filename + "_1", raw_movie, 1, board_seq1, clf1)
-    #     print("    Player 1 movie complete.")
-    #     board_seq2 = robustClassify(clf2)
-    #     makeMovie(base_filename + "_2", raw_movie, 2, board_seq2, clf2)
-    #     print("    Player 2 movie complete.")
-    return pickle_name
+    # Pickle the record. Return the pickled filename.
+    filepath_no_ext = os.path.join(game_record_path, record[0][0])  # start time
+    pickle_path = filepath_no_ext + ".p"
+    pickle.dump(record, open(pickle_path, "wb"))
+    return pickle_path
+
+
+def unpickleGameRecord(pickle_path):
+    return pickle.load(open(pickle_path, "rb"))
+
+
+def gameRecordVideo(pickle_path, movie_src):
+    record = unpickleGameRecord(pickle_path)
+    base_filename = pickle_path.split(".")[0]
+    board_seq1 = robustClassify(record[1])
+    makeMovie(base_filename + "_1", movie_src, 1, board_seq1, record)
+    print("    Player 1 movie complete.")
+    board_seq2 = robustClassify(record[2])
+    makeMovie(base_filename + "_2", movie_src, 2, board_seq2, record)
+    print("    Player 2 movie complete.")
 
 
 def reviewGameRecord(filepath, player):
@@ -59,8 +60,12 @@ def reviewGameRecord(filepath, player):
 vid_filepath = ".tmp/momoken_vs_tom2.mp4"
 vid_identifier = "testing_results"
 
-for record in gameClassifier(vid_filepath, ngames=1, start="00:00:00"):
-    record_path = processGameRecord(vid_identifier, record)
+pickle_paths = []
+for record in gameClassifier(vid_filepath, start="00:00:00"):
+    pickle_paths.append(pickleGameRecord(vid_identifier, record))
+
+for pickle_path in pickle_paths:
+    gameRecordVideo(pickle_path, vid_filepath)
 
 # rpath = "./results/testing_results/0:00:10.p"
 # record = pickle.load(open(rpath, "rb"))

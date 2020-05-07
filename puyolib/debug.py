@@ -5,6 +5,7 @@ from puyolib.puyo import Puyo
 import puyolib.vision
 import numpy as np
 import cv2
+import multiprocessing as mp
 
 _PUYO_COLORS = {
     Puyo.RED: "red",
@@ -122,44 +123,48 @@ def mergeImages(board, overlay):
     return merged
 
 
-def frameGenerator(raw_movie):
-    """Generate the required movie frames."""
-
-    vidpath, start_fno, end_fno = raw_movie
-    cap = cv2.VideoCapture(vidpath)
-    if start_fno > 0:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, start_fno - 1)
-
-    while True:
-        if cap.get(cv2.CAP_PROP_POS_FRAMES) == end_fno - 1:
-            cap.release()
-            return
-        else:
-            yield cap.read()[1]
+def createMovieFrame(frame_data):
+    frame, player, clf, board = frame_data
+    board_state = plotBoardState(board)
+    overlay = plotVideoOverlay(frame, player, clf)
+    merged = mergeImages(board_state, overlay)
+    return merged
 
 
-def makeMovie(filepath, raw_movie, player, board_seq, clf):
-    # transitions is an array of tuples (frame_no, board_state)
-    # boardframes is the raw image of the player board
-    # nextframes is the raw images of the players next puyo
-    print(len(clf), raw_movie)
+def frameDataGenerator(cap, player, board_seq, clf_list):
+    board = None
+    for fno, clf in enumerate(clf_list):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if board_seq and fno >= board_seq[0].frameno:
+            board = board_seq.pop(0).board
+        yield (frame, player, clf, board)
+
+
+def makeMovie(dest, src, player, board_seq, record):
+
+    # Unpack the game record.
+    start_frame = record[0][2]
+    if player == 1:
+        clf_list = record[1]
+    elif player == 2:
+        clf_list = record[2]
+
+    # Write the video.
     video = None
-    tidx = 0
-    board_state = plotBoardState(None)
-    for idx, frame in enumerate(frameGenerator(raw_movie)):
-        print(idx)
-        if tidx < len(board_seq) and idx == board_seq[tidx].frameno:
-            board_state = plotBoardState(board_seq[tidx].board)
-            tidx += 1
-        overlay = plotVideoOverlay(frame, player, clf[idx])
-        merged = mergeImages(board_state, overlay)
-
+    cap = cv2.VideoCapture(src)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    pool = mp.Pool(puyolib.vision.CPU_COUNT)
+    for image in pool.imap(
+        createMovieFrame, frameDataGenerator(cap, player, board_seq, clf_list)
+    ):
         if video is None:
-            h, w, _ = merged.shape
+            h, w, _ = image.shape
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            video = cv2.VideoWriter(filepath + ".mp4", fourcc, 30, (w, h))
+            video = cv2.VideoWriter(dest + ".mp4", fourcc, 30, (w, h))
+        video.write(image)
 
-        video.write(merged)
-
-    cv2.destroyAllWindows()
+    pool.terminate()
     video.release()
+    cap.release()
