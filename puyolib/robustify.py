@@ -93,6 +93,8 @@ def findFlickers(raw_boards):
 def clusterFlickers(flickers):
     """Cluster flickers into groups with the same frame number."""
 
+    if not flickers:
+        return []
     flickers.sort()
     flicker_groups = [[flickers.pop(0)]]
     for f in flickers:
@@ -227,11 +229,15 @@ def getPopSequence(prev_trans, next_trans, pop_groups):
     return pop_sequence
 
 
-def getPuyoMajority(raw_puyo):
+def getPuyoMajority(raw_puyo, gbgSearch=False):
     """Return the majority puyo classification in a sequence."""
 
     puyo_count = Counter(raw_puyo)
-    return puyo_count.most_common(1).pop(0)
+    if gbgSearch:
+        puyo_type, count = puyo_count.most_common(1)[0]
+        if puyo_type is Puyo.NONE:
+            return puyo_count.most_common(2)[-1]
+    return puyo_count.most_common(1)[0]
 
 
 def garbageAtTransition(prev_board_state, raw_boards, trans, next_trans):
@@ -244,9 +250,9 @@ def garbageAtTransition(prev_board_state, raw_boards, trans, next_trans):
         pos = round(trans + 3 * (next_trans - trans) / 4)
         raw_boards_seg = raw_boards[trans:pos]
         raw_puyo_seg = [board[row, col] for board in raw_boards_seg]
-        puyo_type, count = getPuyoMajority(raw_puyo_seg)
-        more_than_half = count > (len(raw_puyo_seg) / 2)
-        if more_than_half and (puyo_type is Puyo.GARBAGE):
+        puyo_type, count = getPuyoMajority(raw_puyo_seg, gbgSearch=True)
+        more_than_third = count > (len(raw_puyo_seg) / 3)
+        if more_than_third and (puyo_type is Puyo.GARBAGE):
             new_board[row, col] = puyo_type
     return State(trans, new_board)
 
