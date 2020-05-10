@@ -251,8 +251,8 @@ def garbageAtTransition(prev_board_state, raw_boards, trans, next_trans):
         raw_boards_seg = raw_boards[trans:pos]
         raw_puyo_seg = [board[row, col] for board in raw_boards_seg]
         puyo_type, count = getPuyoMajority(raw_puyo_seg, gbgSearch=True)
-        more_than_third = count > (len(raw_puyo_seg) / 3)
-        if more_than_third and (puyo_type is Puyo.GARBAGE):
+        more_than_fourth = count > (len(raw_puyo_seg) / 4)
+        if more_than_fourth and (puyo_type is Puyo.GARBAGE):
             new_board[row, col] = puyo_type
     return State(trans, new_board)
 
