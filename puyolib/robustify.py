@@ -108,7 +108,7 @@ def clusterFlickers(flickers):
         pop_group = set()
         for flicker in flicker_group:
             pop_group.add(flicker.bean)
-        pop_groups.append(PopGroup(frameno, pop_group))
+        pop_groups.append(PopGroup(frameno, beans=pop_group))
     return pop_groups
 
 
@@ -200,47 +200,58 @@ def boardAtTransition(prev_board_state, raw_boards, trans):
     return State(trans, new_board)
 
 
-def checkAdjacencies(beans, pos):
-    """Return true if the position is adjacent to the specified beans."""
+def getAdjacentBeans(board, pos):
 
-    posr, posc = pos
-    adjacent = set()
-    for row, col, puyo_type in beans:
-        if (row == posr) and (col == posc - 1):
-            adjacent.add(puyo_type)
-        elif (row == posr) and (col == posc + 1):
-            adjacent.add(puyo_type)
-        elif (row == posr - 1) and (col == posc):
-            adjacent.add(puyo_type)
-        elif (row == posr + 1) and (col == posc):
-            adjacent.add(puyo_type)
-        if adjacent:
-            break
-    return adjacent
+    row, col = pos
+    beanlist = []
+    if row > 0:
+        bean = board[row - 1, col]
+        beanlist.append(Bean(row - 1, col, bean))
+    if row < 11:
+        bean = board[row + 1, col]
+        beanlist.append(Bean(row + 1, col, bean))
+    if col > 0:
+        bean = board[row, col - 1]
+        beanlist.append(Bean(row, col - 1, bean))
+    if col < 5:
+        bean = board[row, col + 1]
+        beanlist.append(Bean(row, col + 1, bean))
+    return beanlist
+
+
+def checkMissingGarbage(board, beans):
+    """Checks for adjacent garbage next to non-garbage popping beans."""
+
+    updated_popgroup = beans.copy()
+    for bean in beans:
+        if bean.puyo_type is Puyo.GARBAGE:
+            continue
+        adjbeans = getAdjacentBeans(board, (bean.row, bean.col))
+        for adjbean in adjbeans:
+            if adjbean.puyo_type is Puyo.GARBAGE:
+                updated_popgroup.add(adjbean)
+    return updated_popgroup
 
 
 def executePop(pre_pop_board, beans):
     """Compute the resulting board after the pop of the given beans."""
 
+    beans = checkMissingGarbage(pre_pop_board, beans)
     post_pop_board = np.empty_like(pre_pop_board)
     post_pop_board.fill(Puyo.NONE)
     for col_idx, col in enumerate(pre_pop_board.T):
         pop_idx = 0
         for row_idx, puyo in enumerate(col):
-            # Add shim for spotty garbage detection.
-            # adj_garbage = False
-            # adj_puyos = checkAdjacencies(beans, (row_idx, col_idx))
-            # adj_puyos_non_garbage = adj_puyos - set([Puyo.GARBAGE])
-            # if puyo is Puyo.GARBAGE and len(adj_puyos_non_garbage):
-            #    adj_garbage = True
-            if Bean(row_idx, col_idx, puyo) in beans:  # or adj_garbage:
+            if Bean(row_idx, col_idx, puyo) in beans:
                 pop_idx += 1
             else:
                 post_pop_board[row_idx - pop_idx, col_idx] = puyo
     return post_pop_board
 
 
-def boardsDuringPopSequence(prev_board_state, raw_boards, pop_seq, next_trans):
+def boardsDuringPopSequence(
+    prev_board_state, raw_boards, pop_seq, next_trans, next_next_trans
+):
     """Return the list of all board states during a pop sequence."""
 
     pop_board_states = []
@@ -266,7 +277,14 @@ def boardsDuringPopSequence(prev_board_state, raw_boards, pop_seq, next_trans):
         pop_board_states.append(State(frameno, next_pop_board))
         # Execute the pop to derive the next pop board.
         next_pop_board = executePop(next_pop_board, beans)
-    pop_board_states.append(State(next_trans, next_pop_board))
+    # Add the final board at the end of the pop sequence, inclusive of
+    # any garbage that may have fallen at the end of the sequence.
+    final_board_state = State(next_trans, next_pop_board)
+    if next_next_trans:
+        final_board_state = garbageAtTransition(
+            final_board_state, raw_boards, next_trans, next_next_trans
+        )
+    pop_board_states.append(final_board_state)
     return pop_board_states
 
 
@@ -282,13 +300,17 @@ def buildBoardSequence(raw_boards, transitions, pop_groups):
         # Get the frames of the previous and next transitions.
         if idx == 0:
             prev_trans = 0
-            next_trans = transitions[idx + 1]
-        elif idx == (len(transitions) - 1):
-            prev_trans = transitions[idx - 1]
-            next_trans = len(raw_boards) - 1
         else:
             prev_trans = transitions[idx - 1]
+        if idx == (len(transitions) - 1):
+            next_trans = len(raw_boards) - 1
+            next_next_trans = None
+        elif idx == (len(transitions) - 2):
             next_trans = transitions[idx + 1]
+            next_next_trans = len(raw_boards) - 1
+        else:
+            next_trans = transitions[idx + 1]
+            next_next_trans = transitions[idx + 2]
         # Get whether the previous and next frame windows had pops and process.
         prev_pop_sequence = getPopSequence(prev_trans, this_trans, pop_groups)
         next_pop_sequence = getPopSequence(this_trans, next_trans, pop_groups)
@@ -303,7 +325,11 @@ def buildBoardSequence(raw_boards, transitions, pop_groups):
             board_states.append(prev_board_state)
         if next_pop_sequence:
             pop_board_states = boardsDuringPopSequence(
-                prev_board_state, raw_boards, next_pop_sequence, next_trans
+                prev_board_state,
+                raw_boards,
+                next_pop_sequence,
+                next_trans,
+                next_next_trans,
             )
             board_states += pop_board_states
     return board_states

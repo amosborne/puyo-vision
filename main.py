@@ -36,18 +36,18 @@ def gameRecordVideo(pickle_path, movie_src):
 def reviewGameRecord(filepath, player):
     """View board by board robust classification result."""
 
-    record = pickle.load(open(filepath, "rb"))
-    (start, end), clf1, clf2 = record
-    # print("Start Frame: " + str(start[0]) + " (" + str(start[1]) + "s)")
+    record = unpickleGameRecord(filepath)
     if player == 1:
-        clf = clf1
+        clf = record.p1clf
     elif player == 2:
-        clf = clf2
+        clf = record.p2clf
     board_seq = robustClassify(clf)
     for _, board in board_seq:
         img = plotBoardState(board)
         cv2.imshow("", img)
-        cv2.waitKey(0)
+        press = cv2.waitKey(0)
+        if press & 0xFF == ord("q"):
+            break
     cv2.destroyAllWindows()
     return None
 
@@ -55,15 +55,13 @@ def reviewGameRecord(filepath, player):
 vid_filepath = ".tmp/momoken_vs_tom2.mp4"
 vid_identifier = "testing_results"
 
-pickle_paths = []
-for record in gameClassifier(vid_filepath, ngames=1, start="00:05:13"):
-    pickle_paths.append(pickleGameRecord(vid_identifier, record))
+# pickle_paths = []
+# for record in gameClassifier(vid_filepath, ngames=1, start="00:01:20"):
+#     pickle_paths.append(pickleGameRecord(vid_identifier, record))
 
-for pickle_path in pickle_paths:
-    gameRecordVideo(pickle_path, vid_filepath)
+# for pickle_path in pickle_paths:
+#     gameRecordVideo(pickle_path, vid_filepath)
 
-# rpath = "./results/testing_results/0:00:10.p"
-# record = pickle.load(open(rpath, "rb"))
-# processGameRecord(vid_identifier, record, movie=vid_filepath)
-# player = 1
-# reviewGameRecord(rpath, player)
+rpath = "./results/testing_results/0:00:09.p"
+player = 2
+reviewGameRecord(rpath, player)
