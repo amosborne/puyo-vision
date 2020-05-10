@@ -13,7 +13,7 @@ PUYO ROBUST CLASSIFIER
 # that corrupted flickers might still be detected. The set of all flickers
 # found at a particular frame will then be self-validated given constaints on
 # color and geometry inherent to the game.
-_FLICKER_CORRELATION_PEAK_PROMINENCE = 0.2
+_FLICKER_CORRELATION_PEAK_PROMINENCE = 0.19
 
 # The window size used to group flickers into a common frame. The flicker
 # correlation kernel is 13 frames long; the duration of the remaining pop
@@ -23,7 +23,7 @@ _FLICKER_GROUP_FRAME_WINDOW_SIZE = 15
 
 # Window size for selecting a puyo classification by majority at next puyo
 # transitions and pop sequence flickers. Transition majority selected to
-# minimize interference with garbage clouds and the next frame wiondow (puyo
+# minimize interference with garbage clouds and the next frame window (puyo
 # still off-screen).
 _BOARD_AT_TRANSITION_MAJORITY_WINDOW = (-3, 4)
 _BOARD_AT_POPFLICKER_MAJORITY_WINDOW = (0, 8)
@@ -112,14 +112,77 @@ def clusterFlickers(flickers):
     return pop_groups
 
 
-def validatePopGroups(pop_groups):
+def validatePopGroup(board, beans):
     """TODO: Validate pop groups by color and geometry constraints."""
 
-    final_pop_groups = []
-    for pop_group in pop_groups:
-        if len(pop_group.beans) >= 4:
-            final_pop_groups.append(pop_group)
-    return final_pop_groups
+    final_beans = set()
+    while True:
+        if not beans:
+            break
+        start_bean = beans.pop()
+        if start_bean.puyo_type is Puyo.GARBAGE:
+            final_beans.add(start_bean)
+            continue
+        adjcolorset = crawlAdjColors(board, start_bean)
+        if len(adjcolorset) >= 4:
+            final_beans = final_beans | adjcolorset
+        beans -= adjcolorset
+
+    final_beans = checkMissingGarbage(board, final_beans)
+    return final_beans
+
+
+def crawlAdjColors(board, start_bean):
+    """Return the set of adjacent beans sharing the same color."""
+
+    adjcolorset = set([start_bean])
+    while True:
+        beans_to_add = set()
+        for bean in adjcolorset:
+            adjbeans = getAdjacentBeans(board, bean)
+            for adjbean in adjbeans:
+                if adjbean in adjcolorset:
+                    continue
+                if adjbean.puyo_type is start_bean.puyo_type:
+                    beans_to_add.add(adjbean)
+        if not beans_to_add:
+            break
+        adjcolorset = adjcolorset | beans_to_add
+    return adjcolorset
+
+
+def getAdjacentBeans(board, bean):
+    """Return the set of adjacent beans on the board."""
+
+    row, col = bean.row, bean.col
+    adjbeanset = set()
+    if row > 0:
+        bean = board[row - 1, col]
+        adjbeanset.add(Bean(row - 1, col, bean))
+    if row < 11:
+        bean = board[row + 1, col]
+        adjbeanset.add(Bean(row + 1, col, bean))
+    if col > 0:
+        bean = board[row, col - 1]
+        adjbeanset.add(Bean(row, col - 1, bean))
+    if col < 5:
+        bean = board[row, col + 1]
+        adjbeanset.add(Bean(row, col + 1, bean))
+    return adjbeanset
+
+
+def checkMissingGarbage(board, beans):
+    """Checks for adjacent garbage next to non-garbage popping beans."""
+
+    updated_popgroup = beans.copy()
+    for bean in beans:
+        if bean.puyo_type is Puyo.GARBAGE:
+            continue
+        adjbeans = getAdjacentBeans(board, bean)
+        for adjbean in adjbeans:
+            if adjbean.puyo_type is Puyo.GARBAGE:
+                updated_popgroup.add(adjbean)
+    return updated_popgroup
 
 
 def findPopGroups(raw_boards):
@@ -127,27 +190,11 @@ def findPopGroups(raw_boards):
 
     raw_flickers = findFlickers(raw_boards)
     unvalidated_pop_groups = clusterFlickers(raw_flickers)
-    validated_pop_groups = validatePopGroups(unvalidated_pop_groups)
-    return validated_pop_groups
+    return unvalidated_pop_groups
 
 
 def findTransitions(raw_nextpuyo):
     """Find all frames where the next puyo pair is drawn."""
-
-    # both_blank = []
-    # for puyo1, puyo2 in raw_nextpuyo:
-    #     if puyo1 is Puyo.NONE and puyo2 is Puyo.NONE:
-    #         both_blank.append(True)
-    #     else:
-    #         both_blank.append(False)
-    # transitions = []
-    # isblank = False
-    # for idx, b in enumerate(both_blank):
-    #     if b and not isblank:
-    #         transitions.append(idx)
-    #         isblank = True
-    #     elif not b and isblank:
-    #         isblank = False
 
     delay = 0
     transitions = []
@@ -221,43 +268,10 @@ def boardAtTransition(prev_board_state, raw_boards, trans):
     return State(trans, new_board)
 
 
-def getAdjacentBeans(board, pos):
-
-    row, col = pos
-    beanlist = []
-    if row > 0:
-        bean = board[row - 1, col]
-        beanlist.append(Bean(row - 1, col, bean))
-    if row < 11:
-        bean = board[row + 1, col]
-        beanlist.append(Bean(row + 1, col, bean))
-    if col > 0:
-        bean = board[row, col - 1]
-        beanlist.append(Bean(row, col - 1, bean))
-    if col < 5:
-        bean = board[row, col + 1]
-        beanlist.append(Bean(row, col + 1, bean))
-    return beanlist
-
-
-def checkMissingGarbage(board, beans):
-    """Checks for adjacent garbage next to non-garbage popping beans."""
-
-    updated_popgroup = beans.copy()
-    for bean in beans:
-        if bean.puyo_type is Puyo.GARBAGE:
-            continue
-        adjbeans = getAdjacentBeans(board, (bean.row, bean.col))
-        for adjbean in adjbeans:
-            if adjbean.puyo_type is Puyo.GARBAGE:
-                updated_popgroup.add(adjbean)
-    return updated_popgroup
-
-
 def executePop(pre_pop_board, beans):
     """Compute the resulting board after the pop of the given beans."""
 
-    beans = checkMissingGarbage(pre_pop_board, beans)
+    beans = validatePopGroup(pre_pop_board, beans)
     post_pop_board = np.empty_like(pre_pop_board)
     post_pop_board.fill(Puyo.NONE)
     for col_idx, col in enumerate(pre_pop_board.T):
@@ -374,8 +388,6 @@ def robustClassify(raw_clf):
 
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
     pop_groups = findPopGroups(raw_boards)
-    # for g in pop_groups:
-    #    print(g)
     transitions = findTransitions(raw_nextpuyo)
     board_seq = buildBoardSequence(raw_boards, transitions, pop_groups)
     return board_seq
