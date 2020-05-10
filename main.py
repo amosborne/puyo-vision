@@ -41,7 +41,7 @@ def reviewGameRecord(filepath, player):
         clf = record.p1clf
     elif player == 2:
         clf = record.p2clf
-    board_seq = robustClassify(clf)
+    board_seq, nextpuyo_seq = robustClassify(clf)
     for _, board in board_seq:
         img = plotBoardState(board)
         cv2.imshow("", img)
@@ -56,12 +56,12 @@ vid_filepath = ".tmp/momoken_vs_tom2.mp4"
 vid_identifier = "testing_results"
 
 pickle_paths = []
-for record in gameClassifier(vid_filepath, ngames=4, start="00:11:30"):
+for record in gameClassifier(vid_filepath, ngames=1, start="00:00:09"):
     pickle_paths.append(pickleGameRecord(vid_identifier, record))
 
 for pickle_path in pickle_paths:
     gameRecordVideo(pickle_path, vid_filepath)
 
-# rpath = "./results/testing_results/0:11:30.p"
+# rpath = "./results/testing_results/0:00:09.p"
 # player = 1
 # reviewGameRecord(rpath, player)

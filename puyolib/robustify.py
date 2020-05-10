@@ -377,6 +377,22 @@ def buildBoardSequence(raw_boards, transitions, pop_groups):
     return board_states
 
 
+def getNextPuyoSequence(raw_nextpuyo, transitions):
+    """Return the nextpuyo sequence."""
+
+    endcapped_transitions = [0] + transitions + [len(raw_nextpuyo)]
+    raw_puyo1, raw_puyo2 = list(zip(*raw_nextpuyo))
+    nextpuyo_seq = [(None, None)]  # First nextpuyo unknown, last nextpuyo unused.
+    for idx, this_trans in enumerate(endcapped_transitions[:-3]):
+        next_trans = endcapped_transitions[idx + 1]
+        puyo1_count = Counter(raw_puyo1[this_trans:next_trans])
+        puyo2_count = Counter(raw_puyo2[this_trans:next_trans])
+        nextpuyo_seq.append(
+            (puyo1_count.most_common(1).pop()[0], puyo2_count.most_common(1).pop()[0])
+        )
+    return nextpuyo_seq
+
+
 def robustClassify(raw_clf):
     """Return the board state sequence. Raw classifications are assumed to
        begin after the first puyo pair is drawn and ends at an arbitrary time
@@ -396,5 +412,6 @@ def robustClassify(raw_clf):
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
     pop_groups = findPopGroups(raw_boards)
     transitions = findTransitions(raw_nextpuyo)
+    nextpuyo_seq = getNextPuyoSequence(raw_nextpuyo, transitions)
     board_seq = buildBoardSequence(raw_boards, transitions, pop_groups)
-    return board_seq
+    return board_seq, nextpuyo_seq

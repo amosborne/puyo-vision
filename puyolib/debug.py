@@ -139,8 +139,8 @@ def createMovieFrame(frame_data):
 
 def frameDataGenerator(cap, record):
     p1board = p2board = None
-    p1board_seq = robustClassify(record.p1clf)
-    p2board_seq = robustClassify(record.p2clf)
+    p1board_seq, _ = robustClassify(record.p1clf)
+    p2board_seq, _ = robustClassify(record.p2clf)
     for fno, (p1clf, p2clf) in enumerate(zip(record.p1clf, record.p2clf)):
         ret, frame = cap.read()
         if not ret:
