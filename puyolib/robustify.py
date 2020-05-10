@@ -115,7 +115,11 @@ def clusterFlickers(flickers):
 def validatePopGroups(pop_groups):
     """TODO: Validate pop groups by color and geometry constraints."""
 
-    return pop_groups
+    final_pop_groups = []
+    for pop_group in pop_groups:
+        if len(pop_group.beans) >= 4:
+            final_pop_groups.append(pop_group)
+    return final_pop_groups
 
 
 def findPopGroups(raw_boards):
@@ -130,20 +134,37 @@ def findPopGroups(raw_boards):
 def findTransitions(raw_nextpuyo):
     """Find all frames where the next puyo pair is drawn."""
 
-    both_blank = []
-    for puyo1, puyo2 in raw_nextpuyo:
-        if puyo1 is Puyo.NONE and puyo2 is Puyo.NONE:
-            both_blank.append(True)
-        else:
-            both_blank.append(False)
+    # both_blank = []
+    # for puyo1, puyo2 in raw_nextpuyo:
+    #     if puyo1 is Puyo.NONE and puyo2 is Puyo.NONE:
+    #         both_blank.append(True)
+    #     else:
+    #         both_blank.append(False)
+    # transitions = []
+    # isblank = False
+    # for idx, b in enumerate(both_blank):
+    #     if b and not isblank:
+    #         transitions.append(idx)
+    #         isblank = True
+    #     elif not b and isblank:
+    #         isblank = False
+
+    delay = 0
     transitions = []
-    isblank = False
-    for idx, b in enumerate(both_blank):
-        if b and not isblank:
-            transitions.append(idx)
-            isblank = True
-        elif not b and isblank:
-            isblank = False
+    for fno in range(len(raw_nextpuyo) - 2):
+        if delay > 0:
+            delay -= 1
+            continue
+        none_count = 0
+        for idx in range(3):
+            puyo1, puyo2 = raw_nextpuyo[fno + idx]
+            if puyo1 is Puyo.NONE:
+                none_count += 1
+            if puyo2 is Puyo.NONE:
+                none_count += 1
+        if none_count >= 4:
+            transitions.append(fno)
+            delay = 3
     return transitions
 
 
@@ -353,6 +374,8 @@ def robustClassify(raw_clf):
 
     raw_boards, raw_nextpuyo = tuple(zip(*raw_clf))
     pop_groups = findPopGroups(raw_boards)
+    # for g in pop_groups:
+    #    print(g)
     transitions = findTransitions(raw_nextpuyo)
     board_seq = buildBoardSequence(raw_boards, transitions, pop_groups)
     return board_seq
