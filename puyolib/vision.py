@@ -1,7 +1,7 @@
 import os
 from inspect import getsourcefile
 from csv import reader as csvreader
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 import cv2
 import numpy as np
 from scipy.signal import find_peaks
@@ -148,6 +148,12 @@ def predictPuyo(frame, player, pos, nextpuyo=False, shake=0):
     return Puyo(SVM.predict(np.transpose(feature))[1][0])
 
 
+GameRecord = namedtuple(
+    "GameRecord", ["start_time", "end_time", "start_frame", "p1clf", "p2clf"]
+)
+FrameClf = namedtuple("FrameClf", ["board", "nextpuyos"])
+
+
 def classifyFrame(frame, player):
     """Classify each board position and next window frame for the given player."""
 
@@ -161,7 +167,7 @@ def classifyFrame(frame, player):
             board[row - 1][col - 1] = res
     n1 = predictPuyo(frame, player, (1, 1), nextpuyo=True)
     n2 = predictPuyo(frame, player, (2, 1), nextpuyo=True)
-    return (board, (n1, n2))
+    return FrameClf(board=board, nextpuyos=(n1, n2))
 
 
 def shakeAdjust(dimension, shake):
@@ -301,9 +307,13 @@ def gameClassifier(src, start="00:00:00", end=None, ngames=None, opencl=False):
         if clf1 is None or clf2 is None:
             game_end_time = frame2Time(start_frame + frame_count - 1)
             yield (
-                (game_start_time, game_end_time, game_start_frame),
-                clf1_list,
-                clf2_list,
+                GameRecord(
+                    start_time=game_start_time,
+                    end_time=game_end_time,
+                    start_frame=game_start_frame,
+                    p1clf=clf1_list,
+                    p2clf=clf2_list,
+                )
             )
             in_game = False
             clf1_list = []

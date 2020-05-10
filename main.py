@@ -17,7 +17,7 @@ def pickleGameRecord(src_id, record):
         os.mkdir(game_record_path)
 
     # Pickle the record. Return the pickled filename.
-    filepath_no_ext = os.path.join(game_record_path, record[0][0])  # start time
+    filepath_no_ext = os.path.join(game_record_path, record.start_time)
     pickle_path = filepath_no_ext + ".p"
     pickle.dump(record, open(pickle_path, "wb"))
     return pickle_path
@@ -30,12 +30,7 @@ def unpickleGameRecord(pickle_path):
 def gameRecordVideo(pickle_path, movie_src):
     record = unpickleGameRecord(pickle_path)
     base_filename = pickle_path.split(".")[0]
-    board_seq1 = robustClassify(record[1])
-    makeMovie(base_filename + "_1", movie_src, 1, board_seq1, record)
-    print("    Player 1 movie complete.")
-    board_seq2 = robustClassify(record[2])
-    makeMovie(base_filename + "_2", movie_src, 2, board_seq2, record)
-    print("    Player 2 movie complete.")
+    makeMovie(base_filename, movie_src, record)
 
 
 def reviewGameRecord(filepath, player):
@@ -61,7 +56,7 @@ vid_filepath = ".tmp/momoken_vs_tom2.mp4"
 vid_identifier = "testing_results"
 
 pickle_paths = []
-for record in gameClassifier(vid_filepath, start="00:00:00"):
+for record in gameClassifier(vid_filepath, ngames=1, start="00:05:13"):
     pickle_paths.append(pickleGameRecord(vid_identifier, record))
 
 for pickle_path in pickle_paths:

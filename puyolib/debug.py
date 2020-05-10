@@ -1,7 +1,8 @@
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib import pyplot as plt
-from matplotlib import gridspec
+from collections import namedtuple
 from puyolib.puyo import Puyo
+from puyolib.robustify import robustClassify
 import puyolib.vision
 import numpy as np
 import cv2
@@ -123,42 +124,44 @@ def mergeImages(board, overlay):
     return merged
 
 
+FrameData = namedtuple("FrameData", ["frame", "p1clf", "p2clf", "p1board", "p2board"])
+
+
 def createMovieFrame(frame_data):
-    frame, player, clf, board = frame_data
-    board_state = plotBoardState(board)
-    overlay = plotVideoOverlay(frame, player, clf)
-    merged = mergeImages(board_state, overlay)
-    return merged
+    p1board_state = plotBoardState(frame_data.p1board)
+    p1overlay = plotVideoOverlay(frame_data.frame, 1, frame_data.p1clf)
+    p1merged = mergeImages(p1board_state, p1overlay)
+    p2board_state = plotBoardState(frame_data.p2board)
+    p2overlay = plotVideoOverlay(frame_data.frame, 2, frame_data.p2clf)
+    p2merged = mergeImages(p2board_state, p2overlay)
+    return np.hstack((p1merged, p2merged))
 
 
-def frameDataGenerator(cap, player, board_seq, clf_list):
-    board = None
-    for fno, clf in enumerate(clf_list):
+def frameDataGenerator(cap, record):
+    p1board = p2board = None
+    p1board_seq = robustClassify(record.p1clf)
+    p2board_seq = robustClassify(record.p2clf)
+    for fno, (p1clf, p2clf) in enumerate(zip(record.p1clf, record.p2clf)):
         ret, frame = cap.read()
         if not ret:
             break
-        if board_seq and fno >= board_seq[0].frameno:
-            board = board_seq.pop(0).board
-        yield (frame, player, clf, board)
+        if p1board_seq and fno >= p1board_seq[0].frameno:
+            p1board = p1board_seq.pop(0).board
+        if p2board_seq and fno >= p2board_seq[0].frameno:
+            p2board = p2board_seq.pop(0).board
+        yield FrameData(
+            frame=frame, p1clf=p1clf, p2clf=p2clf, p1board=p1board, p2board=p2board
+        )
 
 
-def makeMovie(dest, src, player, board_seq, record):
-
-    # Unpack the game record.
-    start_frame = record[0][2]
-    if player == 1:
-        clf_list = record[1]
-    elif player == 2:
-        clf_list = record[2]
+def makeMovie(dest, src, record):
 
     # Write the video.
     video = None
     cap = cv2.VideoCapture(src)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, record.start_frame)
     pool = mp.Pool(puyolib.vision.CPU_COUNT)
-    for image in pool.imap(
-        createMovieFrame, frameDataGenerator(cap, player, board_seq, clf_list)
-    ):
+    for image in pool.imap(createMovieFrame, frameDataGenerator(cap, record)):
         if video is None:
             h, w, _ = image.shape
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
