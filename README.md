@@ -1,3 +1,3 @@
 # puyo-vision
 
-hello world
+Work in progress.

@@ -19,7 +19,7 @@ _FLICKER_CORRELATION_PEAK_PROMINENCE = 0.19
 # correlation kernel is 13 frames long; the duration of the remaining pop
 # animation is approximately 15 frames long. This value is selected somewhat
 # arbitrarily.
-_FLICKER_GROUP_FRAME_WINDOW_SIZE = 15
+_FLICKER_GROUP_FRAME_WINDOW_SIZE = 24
 
 # Window size for selecting a puyo classification by majority at next puyo
 # transitions and pop sequence flickers. Transition majority selected to
@@ -247,7 +247,8 @@ def garbageAtTransition(prev_board_state, raw_boards, trans, next_trans):
     for (row, col), puyo in np.ndenumerate(prev_board_state.board):
         if puyo is not Puyo.NONE:
             continue
-        pos = round(trans + 3 * (next_trans - trans) / 4)
+        seg_length = min(3 * (next_trans - trans) / 4, 20)  # 20 frame limit
+        pos = round(trans + seg_length)
         raw_boards_seg = raw_boards[trans:pos]
         raw_puyo_seg = [board[row, col] for board in raw_boards_seg]
         puyo_type, count = getPuyoMajority(raw_puyo_seg, gbgSearch=True)

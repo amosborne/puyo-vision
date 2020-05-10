@@ -145,9 +145,9 @@ def frameDataGenerator(cap, record):
         ret, frame = cap.read()
         if not ret:
             break
-        if p1board_seq and fno >= p1board_seq[0].frameno:
+        if p1board_seq and fno >= p1board_seq[0].frameno - 1:
             p1board = p1board_seq.pop(0).board
-        if p2board_seq and fno >= p2board_seq[0].frameno:
+        if p2board_seq and fno >= p2board_seq[0].frameno - 1:
             p2board = p2board_seq.pop(0).board
         yield FrameData(
             frame=frame, p1clf=p1clf, p2clf=p2clf, p1board=p1board, p2board=p2board
