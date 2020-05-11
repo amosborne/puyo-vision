@@ -41,6 +41,9 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
     nextpuyo_idx = 0
     board_seq = board_seq[1:]
     for board in board_seq:
+        popset = getPopSet(board)
+        if popset:
+            print(popset)
         for play_sequence in play_sequences:
             deltas = boardDeltas(board, play_sequence.board)
 
@@ -59,6 +62,50 @@ def boardDeltas(next_visible_board, prev_full_board):
             deltas.add(PuyoPlacement(nv_puyo_type, row, col))
 
     return deltas
+
+
+def getPopSet(board):
+    """Return a set of puyos popping on the given board."""
+
+    popset = set()
+    for (row, col), puyo_type in np.ndenumerate(board):
+        if puyo_type is Puyo.NONE:
+            continue
+        popgroup = set([PuyoPlacement(puyo_type, row, col)])
+        while True:
+            puyos_to_add = set()
+            for puyo in popgroup:
+                if puyo is Puyo.GARBAGE:
+                    continue
+                adjpuyos = getAdjPuyos(board, puyo)
+                filtered_adjpuyos = [
+                    p
+                    for p in adjpuyos
+                    if p.puyo_type is puyo.puyo_type or p.puyo_type is Puyo.GARBAGE
+                ]
+                puyos_to_add.update(filtered_adjpuyos)
+            if popgroup >= puyos_to_add:
+                break
+            else:
+                popgroup.update(puyos_to_add)
+        if len(popgroup) >= 4:
+            popset.update(popgroup)
+    return popset
+
+
+def getAdjPuyos(board, puyo):
+    """Return the set of adjacent puyo placements to the given puyo."""
+
+    adjset = set()
+    if puyo.row > 0:
+        adjset.add(PuyoPlacement(board[puyo.row - 1, puyo.col], puyo.row - 1, puyo.col))
+    if puyo.row < 11:
+        adjset.add(PuyoPlacement(board[puyo.row + 1, puyo.col], puyo.row + 1, puyo.col))
+    if puyo.col > 0:
+        adjset.add(PuyoPlacement(board[puyo.row, puyo.col - 1], puyo.row, puyo.col - 1))
+    if puyo.col < 5:
+        adjset.add(PuyoPlacement(board[puyo.row, puyo.col + 1], puyo.row, puyo.col + 1))
+    return adjset
 
 
 def main():
