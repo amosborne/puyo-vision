@@ -1,5 +1,4 @@
 from collections import namedtuple
-from warnings import warn
 from puyolib.puyo import Puyo
 import numpy as np
 
@@ -17,7 +16,7 @@ A play sequence is a list of puyo moves combined with garbage falls.
 PuyoPlacement = namedtuple("PuyoPlacement", ["puyo_type", "row", "col"])
 PuyoMove = namedtuple("PuyoMove", ["p1", "p2"])
 GarbageFall = namedtuple("GarbageFall", ["placement_list"])
-PlaySequence = namedtuple("PlaySequence", ["board", "event_list"])
+PlaySequence = namedtuple("PlaySequence", ["board_list", "event_list"])
 
 
 # In order for hidden and vanish row placements to be deduced, multiple
@@ -35,17 +34,50 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
     # Initialize the starting play sequence.
     board = np.empty(shape=(13, 6), dtype=Puyo)
     board.fill(Puyo.NONE)
-    play_sequences = [PlaySequence(board, event_list=[])]
+    play_sequences = [PlaySequence(board_list=[board], event_list=[])]
 
     # Loop through the board sequence to determine valid play sequences.
     nextpuyo_idx = 0
     board_seq = board_seq[1:]
     for board in board_seq:
         popset = getPopSet(board)
-        if popset:
-            print(popset)
-        for play_sequence in play_sequences:
-            deltas = boardDeltas(board, play_sequence.board)
+        for play_seq in play_sequences:
+            if popset:
+                break
+            else:
+                deltas = boardDeltas(board, play_seq.board_list[-1])
+                moves = possiblePuyoMoves(
+                    play_seq.board_list[-1], nextpuyo_seq[nextpuyo_idx], deltas
+                )
+                print(moves)
+
+    return None
+
+
+def possiblePuyoMoves(board, nextpuyo, deltas):
+    """Return the set of puyo moves possible given the board and deltas."""
+
+    # Find the non-garbage deltas.
+    color_deltas = [d for d in deltas if d.puyo_type is not Puyo.GARBAGE]
+
+    # Determine the possible moves.
+    # Sanity check there can be no more than 2 deltas.
+    if len(color_deltas) > 2:
+        raise UserWarning("More than two puyos suspected to be placed in one move.")
+    elif len(color_deltas) == 2:
+        if (nextpuyo[0] is None or color_deltas[0].puyo_type is nextpuyo[0]) and (
+            nextpuyo[1] is None or color_deltas[1].puyo_type is nextpuyo[1]
+        ):
+            return PuyoMove(color_deltas[0], color_deltas[1])
+        elif (
+            color_deltas[0].puyo_type is nextpuyo[1]
+            and color_deltas[1].puyo_type is nextpuyo[0]
+        ):
+            return PuyoMove(color_deltas[0], color_deltas[1])
+        else:
+            raise UserWarning("The two puyos placed do not match the next puyos.")
+    else:
+        pass
 
     return None
 
