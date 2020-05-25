@@ -13,7 +13,7 @@ PUYO ROBUST CLASSIFIER
 # that corrupted flickers might still be detected. The set of all flickers
 # found at a particular frame will then be self-validated given constaints on
 # color and geometry inherent to the game.
-_FLICKER_CORRELATION_PEAK_PROMINENCE = 0.19
+_FLICKER_CORRELATION_PEAK_PROMINENCE = 0.20
 
 # The window size used to group flickers into a common frame. The flicker
 # correlation kernel is 13 frames long; the duration of the remaining pop
@@ -200,18 +200,18 @@ def findTransitions(raw_nextpuyo):
 
     delay = 0
     transitions = []
-    for fno in range(len(raw_nextpuyo) - 2):
+    for fno in range(len(raw_nextpuyo) - 1):
         if delay > 0:
             delay -= 1
             continue
         none_count = 0
-        for idx in range(3):
+        for idx in range(2):
             puyo1, puyo2 = raw_nextpuyo[fno + idx]
             if puyo1 is Puyo.NONE:
                 none_count += 1
             if puyo2 is Puyo.NONE:
                 none_count += 1
-        if none_count >= 4:
+        if none_count >= 3:
             transitions.append(fno)
             delay = 3
     return transitions

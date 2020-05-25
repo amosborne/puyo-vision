@@ -1,4 +1,5 @@
-from collections import namedtuple
+from collections import namedtuple, Counter
+from copy import deepcopy
 from puyolib.puyo import Puyo
 import numpy as np
 
@@ -22,62 +23,110 @@ PlaySequence = namedtuple("PlaySequence", ["board_list", "event_list"])
 # In order for hidden and vanish row placements to be deduced, multiple
 # board states will be carried forward in parallel wherever there is
 # ambiguity. If at the end of the game there remains multiple valid
-# play sequences, the play sequence which vanishes the least number
-# of puyos will be selected. In case of a tie, the choice will be random.
+# play sequences, the choice will be random.
 def deducePlaySequence(board_seq, nextpuyo_seq):
     """Given a board sequence and the corresponding next puyos, deduce the
     move sequence (including garbage and hidden row usage).
-
-    Also return the revised board sequence with the hidden row included.
     """
 
     # Initialize the starting play sequence.
     board = np.empty(shape=(13, 6), dtype=Puyo)
     board.fill(Puyo.NONE)
     play_sequences = [PlaySequence(board_list=[board], event_list=[])]
-
-    # Loop through the board sequence to determine valid play sequences.
     nextpuyo_idx = 0
     board_seq = board_seq[1:]
+
+    # Loop through the board sequence to determine valid play sequences.
     for board in board_seq:
         popset = getPopSet(board)
         for play_seq in play_sequences:
+            new_play_sequences = []
+
             if popset:
-                break
+                raise UserWarning("Pops not implemented.")
+
             else:
+                prev_board = play_seq.board_list[-1]
+
+                # Determine the possible moves given no pops.
                 deltas = boardDeltas(board, play_seq.board_list[-1])
-                moves = possiblePuyoMoves(
-                    play_seq.board_list[-1], nextpuyo_seq[nextpuyo_idx], deltas
+                moves, falls = possiblePuyoMoves(
+                    prev_board, nextpuyo_seq[nextpuyo_idx], deltas
                 )
                 print(moves)
 
+                # Create new boards and subsequent play sequences.
+                new_boards, events = createNewBoards(prev_board, moves, falls)
+                for board, event in zip(new_boards, events):
+                    prev_board_seq = deepcopy(play_seq.board_list)
+                    prev_board_seq.append(board)
+                    prev_event_seq = deepcopy(play_seq.event_list)
+                    prev_event_seq.extend(event)
+                    new_play_sequences.append(
+                        PlaySequence(
+                            board_list=prev_board_seq, event_list=prev_event_seq
+                        )
+                    )
+
+                # Iterate the next puyos.
+                nextpuyo_idx += 1
+
+        # Update the play sequences.
+        play_sequences = new_play_sequences
+
     return None
+
+
+def createNewBoards(prev_board, moves, falls):
+    """Return a list of boards created by applying a single move."""
+
+    if falls:
+        UserWarning("New boards with garbage not implemented.")
+
+    new_boards = []
+    events = []
+    for move in moves:
+        base = np.copy(prev_board)
+        base[move.p1.row, move.p1.col] = move.p1.puyo_type
+        base[move.p2.row, move.p2.col] = move.p2.puyo_type
+        new_boards.append(base)
+        events.append([move])
+
+    return new_boards, events
 
 
 def possiblePuyoMoves(board, nextpuyo, deltas):
     """Return the set of puyo moves possible given the board and deltas."""
 
-    # Find the non-garbage deltas.
+    # List of the non-garbage and garbage deltas.
     color_deltas = [d for d in deltas if d.puyo_type is not Puyo.GARBAGE]
+    garbage_deltas = [d for d in deltas if d.puyo_type is Puyo.GARBAGE]
 
-    # Determine the possible moves.
-    # Sanity check there can be no more than 2 deltas.
+    if garbage_deltas:
+        raise UserWarning("Garbage falls not implemented.")
+
+    # Raise an error if there are more than two color deltas.
     if len(color_deltas) > 2:
-        raise UserWarning("More than two puyos suspected to be placed in one move.")
+        raise UserWarning("More than two puyos placed in one move.")
+
+    # If there are exactly two color deltas, then determine the move.
     elif len(color_deltas) == 2:
-        if (nextpuyo[0] is None or color_deltas[0].puyo_type is nextpuyo[0]) and (
-            nextpuyo[1] is None or color_deltas[1].puyo_type is nextpuyo[1]
-        ):
-            return PuyoMove(color_deltas[0], color_deltas[1])
-        elif (
-            color_deltas[0].puyo_type is nextpuyo[1]
-            and color_deltas[1].puyo_type is nextpuyo[0]
-        ):
-            return PuyoMove(color_deltas[0], color_deltas[1])
-        else:
-            raise UserWarning("The two puyos placed do not match the next puyos.")
+
+        # The first move does has next puyos that are None.
+        if nextpuyo[0] is None and nextpuyo[1] is None:
+            return [PuyoMove(color_deltas[0], color_deltas[1])], []
+
+        # If the next puyos match the two color deltas, return the move.
+        nextpuyos = Counter(nextpuyo)
+        deltacolors = Counter([cd.puyo_type for cd in color_deltas])
+        if nextpuyos == deltacolors:
+            return [PuyoMove(color_deltas[0], color_deltas[1])], []
+
+        raise UserWarning("The two puyos placed do not match the next puyos.")
+
+    # Handle single color deltas, garbage falls.
     else:
-        pass
+        raise UserWarning("Single color deltas not implemented.")
 
     return None
 
@@ -141,11 +190,13 @@ def getAdjPuyos(board, puyo):
 
 
 def main():
-    record = pickle.load(open("results/testing_results/0:00:09.p", "rb"))
-    board_seq, nextpuyo_seq = robustClassify(record.p1clf)
+    # Load the board state sequence pre-deduction.
+    record = pickle.load(open("results/testing_results/0:01:20.p", "rb"))
+    board_state_seq, nextpuyo_seq = robustClassify(record.p1clf)
     # board_seq, nextpuyo_seq = robustClassify(record.p2clf)
 
-    board_seq = [state.board for state in board_seq]
+    # Deduce the play sequence and the new board states.
+    board_seq = [state.board for state in board_state_seq]
     deducePlaySequence(board_seq, nextpuyo_seq)
 
 

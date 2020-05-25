@@ -55,13 +55,13 @@ def reviewGameRecord(filepath, player):
 vid_filepath = ".tmp/momoken_vs_tom2.mp4"
 vid_identifier = "testing_results"
 
-pickle_paths = []
-for record in gameClassifier(vid_filepath, ngames=1, start="00:00:09"):
-    pickle_paths.append(pickleGameRecord(vid_identifier, record))
+# pickle_paths = []
+# for record in gameClassifier(vid_filepath, start="00:01:20"):
+#     pickle_paths.append(pickleGameRecord(vid_identifier, record))
 
-for pickle_path in pickle_paths:
-    gameRecordVideo(pickle_path, vid_filepath)
+# for pickle_path in pickle_paths:
+#     gameRecordVideo(pickle_path, vid_filepath)
 
-# rpath = "./results/testing_results/0:00:09.p"
-# player = 1
-# reviewGameRecord(rpath, player)
+rpath = "./results/testing_results/2:05:22.p"
+player = 2
+reviewGameRecord(rpath, player)
