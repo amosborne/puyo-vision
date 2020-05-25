@@ -35,46 +35,88 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
     play_sequences = [PlaySequence(board_list=[board], event_list=[])]
     nextpuyo_idx = 0
     board_seq = board_seq[1:]
+    firstPop = True
 
     # Loop through the board sequence to determine valid play sequences.
     for board in board_seq:
+        new_play_sequences = []
         popset = getPopSet(board)
-        for play_seq in play_sequences:
-            new_play_sequences = []
 
-            if popset:
-                raise UserWarning("Pops not implemented.")
-
-            else:
+        # If the previous board was a pop...
+        if not firstPop:
+            for play_seq in play_sequences:
                 prev_board = play_seq.board_list[-1]
-
-                # Determine the possible moves given no pops.
-                deltas = boardDeltas(board, play_seq.board_list[-1])
-                moves, falls = possiblePuyoMoves(
-                    prev_board, nextpuyo_seq[nextpuyo_idx], deltas
-                )
-                print(moves)
-
-                # Create new boards and subsequent play sequences.
-                new_boards, events = createNewBoards(prev_board, moves, falls)
-                for board, event in zip(new_boards, events):
-                    prev_board_seq = deepcopy(play_seq.board_list)
-                    prev_board_seq.append(board)
-                    prev_event_seq = deepcopy(play_seq.event_list)
-                    prev_event_seq.extend(event)
+                postpop_board = executePop(prev_board, popset)
+                # placeholder : validate/prune play_seq, post-pop
+                if not popset:
+                    raise UserWarning("Last pop garbage check not implimented.")
+                else:
                     new_play_sequences.append(
-                        PlaySequence(
-                            board_list=prev_board_seq, event_list=prev_event_seq
-                        )
+                        extendPlaySequence(play_seq, postpop_board)
                     )
 
-                # Iterate the next puyos.
-                nextpuyo_idx += 1
+        else:
+            nextpuyos = nextpuyo_seq[nextpuyo_idx]
+            for play_seq in play_sequences:
+                new_play_sequences.extend(
+                    newPossiblePlaySequences(play_seq, board, nextpuyos)
+                )
+            nextpuyo_idx += 1
+            if popset:
+                firstPop = False
 
         # Update the play sequences.
         play_sequences = new_play_sequences
 
     return None
+
+
+def extendPlaySequence(play_seq, board, events=[]):
+    """Return a new play sequence extended by the given board and events."""
+
+    prev_board_seq = deepcopy(play_seq.board_list)
+    prev_board_seq.append(board)
+    prev_event_seq = deepcopy(play_seq.event_list)
+    prev_event_seq.extend(events)
+    return PlaySequence(board_list=prev_board_seq, event_list=prev_event_seq)
+
+
+def executePop(pop_board, popset):
+    """Pop the puyos in popset and return the resulting board."""
+
+    base = np.copy(pop_board)
+    for _, row, col in popset:
+        base[row, col] = Puyo.NONE
+
+    result = np.empty_like(base)
+    result.fill(Puyo.NONE)
+    for col_idx, puyo_col in enumerate(base.T):
+        fall_idx = 0
+        for row_idx, puyo in enumerate(puyo_col):
+            if puyo is Puyo.NONE:
+                fall_idx += 1
+            else:
+                result[row_idx - fall_idx, col_idx] = puyo
+
+    return result
+
+
+def newPossiblePlaySequences(play_seq, board, nextpuyos):
+    """Return list of possible play sequences."""
+
+    new_play_sequences = []
+    prev_board = play_seq.board_list[-1]
+
+    # Determine the possible moves given no pops.
+    deltas = boardDeltas(board, play_seq.board_list[-1])
+    moves, falls = possiblePuyoMoves(prev_board, nextpuyos, deltas)
+
+    # Create new boards and subsequent play sequences.
+    new_boards, events = createNewBoards(prev_board, moves, falls)
+    for board, event in zip(new_boards, events):
+        new_play_sequences.append(extendPlaySequence(play_seq, board, event))
+
+    return new_play_sequences
 
 
 def createNewBoards(prev_board, moves, falls):
