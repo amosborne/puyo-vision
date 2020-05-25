@@ -1,5 +1,6 @@
 from collections import namedtuple, Counter
 from copy import deepcopy
+from itertools import chain, combinations
 from puyolib.puyo import Puyo
 import numpy as np
 
@@ -33,6 +34,12 @@ class PuyoLogicException(Exception):
         return self.msg
 
 
+def powerset(iterable):
+    "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
+    s = list(iterable)
+    return chain.from_iterable(combinations(s, r) for r in range(len(s) + 1))
+
+
 def deducePlaySequence(board_seq, nextpuyo_seq):
     """Given a board sequence and the corresponding next puyos, deduce the
     move sequence (including garbage and hidden row usage).
@@ -60,11 +67,24 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
                 prev_board = play_seq.boards[-1]
                 prev_popset = popSet(prev_board)
                 postpop_board = executePop(prev_board, prev_popset)
-                if playSeqInvalid(board, postpop_board):
-                    continue
                 if not popset:
-                    raise UserWarning("Last pop garbage check not implimented.")
+                    if playSeqInvalid(board, postpop_board, islastpop=True):
+                        continue
+                    play_seq.boards.append(postpop_board)
+                    deltas = boardDeltas(board, postpop_board)
+                    certain_gbg, possible_gbg = possibleGarbage(postpop_board, deltas)
+                    certain_moves = deltas | certain_gbg
+                    new_play_sequences.extend(
+                        extendUncertainPlaySequence(
+                            play_seq, certain_moves, uncertain_moves=possible_gbg
+                        )
+                    )
+                    for new_play_seq in new_play_sequences:
+                        del new_play_seq.boards[-2]  # Hack to remove extra board.
+                    firstPop = True
                 else:
+                    if playSeqInvalid(board, postpop_board, islastpop=False):
+                        continue
                     play_seq.boards.append(postpop_board)
                     new_play_sequences.append(play_seq)
 
@@ -84,7 +104,7 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
     return None
 
 
-def playSeqInvalid(next_board, postpop_board):
+def playSeqInvalid(next_board, postpop_board, islastpop):
     """Return true (invalid) if the visible area of the predicted board
     does not match the next board.
     """
@@ -92,8 +112,12 @@ def playSeqInvalid(next_board, postpop_board):
     invalid = False
     try:
         deltas = boardDeltas(next_board, postpop_board)
-        if deltas:
+        if not islastpop and deltas:
             invalid = True
+        else:
+            color_deltas = [d for d in deltas if d.kind is not Puyo.GARBAGE]
+            if color_deltas:
+                invalid = True
     except PuyoLogicException:
         invalid = True
 
@@ -138,6 +162,19 @@ def possiblePlaySequences(play_seq, next_board, nextpuyos):
     return new_play_sequences
 
 
+def extendUncertainPlaySequence(play_seq, certain_moves, uncertain_moves):
+    """Return a list of possible play sequences where any number of uncertain
+    moves may be applied in addition to the certain moves.
+    """
+
+    new_play_sequences = []
+    for unc_move in powerset(uncertain_moves):
+        moves = certain_moves | set(unc_move)
+        new_play_sequences.append(extendPlaySequence(play_seq, moves))
+
+    return new_play_sequences
+
+
 def extendPlaySequence(play_seq, next_moves):
     """Return a new play sequence extended by the next moves."""
 
@@ -157,6 +194,50 @@ def applyMoves(prev_board, moves):
         next_board[move.row, move.col] = move.kind
 
     return next_board
+
+
+def possibleGarbage(board, gbg_deltas):
+    """Return the set of possible garbage placements in the hidden row, given
+    a set of garbage deltas relative to a board.
+    """
+
+    gbg_base_board = applyMoves(board, gbg_deltas)
+
+    # Find the minimum garbage height. No more than five rows at a time.
+    gbg_min_height = 5
+    for col_idx, puyo_col in enumerate(gbg_base_board.T):
+        gbg_col_height = 0
+        for row_idx, kind in enumerate(puyo_col):
+            pre_gbg = board[row_idx, col_idx]
+            post_gbg = gbg_base_board[row_idx, col_idx]
+            if pre_gbg is Puyo.NONE and post_gbg is Puyo.GARBAGE:
+                gbg_col_height += 1
+        if gbg_col_height < gbg_min_height:
+            gbg_min_height = gbg_col_height
+
+    # Find all hidden row positions that garbage could be in.
+    gbg_max_height = gbg_min_height + 1
+    certain_hidden_gbg = set()
+    possible_hidden_gbg = set()
+    for col_idx, puyo_col in enumerate(gbg_base_board.T):
+        gbg_height = 0
+        top_row = 0
+        for row_idx, ind in enumerate(puyo_col):
+            pre_gbg = board[row_idx, col_idx]
+            post_gbg = gbg_base_board[row_idx, col_idx]
+            if pre_gbg is Puyo.NONE and post_gbg is Puyo.GARBAGE:
+                gbg_height += 1
+            if post_gbg is not Puyo.NONE:
+                top_row += 1
+        if gbg_height > gbg_max_height:
+            raise PuyoLogicException("Inconsistent garbage heights.")
+        if top_row == 11 and gbg_height < gbg_max_height:
+            if gbg_height < gbg_min_height:
+                certain_hidden_gbg.add(PuyoPlc(kind=Puyo.GARBAGE, row=12, col=col_idx))
+            else:
+                possible_hidden_gbg.add(PuyoPlc(kind=Puyo.GARBAGE, row=12, col=col_idx))
+
+    return certain_hidden_gbg, possible_hidden_gbg
 
 
 def possibleMoves(board, nextpuyo, deltas):
