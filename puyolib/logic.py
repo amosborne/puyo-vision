@@ -100,6 +100,7 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
 
         # Update the play sequences.
         play_sequences = new_play_sequences
+        print(len(play_sequences), play_sequences[0].moves)
 
     return None
 
@@ -115,7 +116,7 @@ def playSeqInvalid(next_board, postpop_board, islastpop):
         if not islastpop and deltas:
             invalid = True
         else:
-            color_deltas = [d for d in deltas if d.kind is not Puyo.GARBAGE]
+            color_deltas = {d for d in deltas if d.kind is not Puyo.GARBAGE}
             if color_deltas:
                 invalid = True
     except PuyoLogicException:
@@ -152,10 +153,10 @@ def possiblePlaySequences(play_seq, next_board, nextpuyos):
 
     # Determine the possible moves.
     deltas = boardDeltas(next_board, prev_board)
-    move_list = possibleMoves(prev_board, nextpuyos, deltas)
+    move_set = possibleMoves(prev_board, nextpuyos, deltas)
 
     # Create new boards and subsequent play sequences.
-    for moves in move_list:
+    for moves in move_set:
         new_play_seq = extendPlaySequence(play_seq, moves)
         new_play_sequences.append(new_play_seq)
 
@@ -191,6 +192,8 @@ def applyMoves(prev_board, moves):
 
     next_board = np.copy(prev_board)
     for move in moves:
+        if move.row > 12:
+            continue
         next_board[move.row, move.col] = move.kind
 
     return next_board
@@ -240,26 +243,108 @@ def possibleGarbage(board, gbg_deltas):
     return certain_hidden_gbg, possible_hidden_gbg
 
 
+def possibleColor(board, certain_move, remaining_puyos):
+    """Return a list of color moves which combines the certain move (if any)
+    with the possible moves for the remaining puyos.
+    """
+
+    if certain_move:
+        return possibleColorConstrained(
+            board, certain_move.pop(), remaining_puyos.pop()
+        )
+
+    hidden_spots, _ = invisiblePositions(board)
+    move_set = set()
+    for row, col in hidden_spots:
+        certain_submove = PuyoPlc(kind=remaining_puyos[0], row=row, col=col)
+        move_subset = possibleColorConstrained(
+            board, certain_submove, remaining_puyos[1]
+        )
+        move_set |= move_subset
+
+    return move_set
+
+
+def possibleColorConstrained(board, certain_move, remaining_puyo):
+    """Return the list of possible moves where certain move is known."""
+
+    base_board = applyMoves(board, set([certain_move]))
+    hidden_spots, vanish_spots = invisiblePositions(
+        base_board, col_constraint=certain_move.col
+    )
+
+    move_set = set()
+    for row, col in hidden_spots | vanish_spots:
+        move = frozenset({certain_move, PuyoPlc(kind=remaining_puyo, row=row, col=col)})
+        move_set.add(move)
+
+    return move_set
+
+
+def invisiblePositions(board, col_constraint=None):
+    """Return the available hidden positions in the hidden and vanish rows."""
+
+    hidden = set()
+    vanish = set()
+    for col_idx in range(0, 6):
+        if col_constraint is not None:
+            if abs(col_idx - col_constraint) > 1:
+                continue
+
+        height = columnHeight(board, col_idx)
+        adjheight = adjColumnHeight(board, col_idx)
+
+        if height == 12:
+            hidden.add((height, col_idx))
+            vanish.add((height + 1, col_idx))
+        elif height == 13 and adjheight == 12:
+            vanish.add((height, col_idx))
+
+    return hidden, vanish
+
+
+def adjColumnHeight(board, col_idx):
+    """Return the taller height of the one or two adjacent columns."""
+
+    if col_idx == 0:
+        height = columnHeight(board, col_idx + 1)
+    elif col_idx == 5:
+        height = columnHeight(board, col_idx - 1)
+    else:
+        height = max(columnHeight(board, col_idx - 1), columnHeight(board, col_idx + 1))
+
+    return height
+
+
+def columnHeight(board, col_idx):
+    """Return the height of the specified column."""
+
+    height = 0
+    for puyo in board.T[col_idx]:
+        if puyo is not Puyo.NONE:
+            height += 1
+
+    return height
+
+
 def possibleMoves(board, nextpuyo, deltas):
     """Return the set of puyo moves possible given the board and deltas."""
 
-    color_deltas = [d for d in deltas if d.kind is not Puyo.GARBAGE]
-    garbage_deltas = [d for d in deltas if d.kind is Puyo.GARBAGE]
+    color_deltas = {d for d in deltas if d.kind is not Puyo.GARBAGE}
+    garbage_deltas = {d for d in deltas if d.kind is Puyo.GARBAGE}
 
     if len(color_deltas) > 2:
         raise PuyoLogicException("More than two puyos placed in one move.")
 
-    nextpuyo = Counter(nextpuyo)
-    base_move = set()
-
     # First move does not have a defined next puyo.
+    nextpuyo = Counter(nextpuyo)
     if nextpuyo == Counter((None, None)):
         if len(color_deltas) < 2:
             raise PuyoLogicException("First move placed fewer than two puyos.")
-        base_move |= set(color_deltas)
-        color_moves = [base_move]
+        color_moves = set([frozenset(color_deltas)])
 
     else:
+        base_move = set()
         for color_delta in color_deltas:
             if color_delta.kind not in nextpuyo:
                 raise PuyoLogicException("Puyo placement does not match next puyos.")
@@ -268,13 +353,11 @@ def possibleMoves(board, nextpuyo, deltas):
             nextpuyo += Counter()  # Delete items with zero count.
 
         if nextpuyo:
-            color_moves = []
-            raise UserWarning("Hidden/vanish row color deltas not implimented.")
+            color_moves = possibleColor(board, base_move, set(nextpuyo.elements()))
         else:
-            color_moves = [base_move]
+            color_moves = set([frozenset(color_deltas)])
 
     if garbage_deltas:
-        garbage_moves = []
         raise UserWarning("Garbage deltas not implimented.")
     else:
         garbage_moves = color_moves
@@ -373,7 +456,7 @@ def main():
     # Load the board state sequence pre-deduction.
     record = pickle.load(open("results/testing_results/0:01:20.p", "rb"))
     board_state_seq, nextpuyo_seq = robustClassify(record.p1clf)
-    # board_seq, nextpuyo_seq = robustClassify(record.p2clf)
+    # board_state_seq, nextpuyo_seq = robustClassify(record.p2clf)
 
     # Deduce the play sequence and the new board states.
     board_seq = [state.board for state in board_state_seq]
