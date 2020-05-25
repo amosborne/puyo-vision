@@ -10,20 +10,29 @@ import pickle
 The board is 13 rows (12 plus the hidden row) and 6 columns, 0 indexed.
 A puyo placement is a puyo type at a board position. The position may be
 in row 14 (the vanish row). Only one puyo can be vanished per move.
-A puyo move is two puyo placements (one for each of the next puyo pair).
-A garbage fall is a list of garbage puyo placements.
-A play sequence is a list of puyo moves combined with garbage falls.
+
+A move is a set of puyo placements (potentially including garbage). The
+resulting play sequence is a list of moves as well as the associated
+list of board states. In the event that there are multiple valid play
+sequences, one is chose at random.
+
+Garbage always falls after the colored puyos are placed.
 """
-PuyoPlacement = namedtuple("PuyoPlacement", ["puyo_type", "row", "col"])
-PuyoMove = namedtuple("PuyoMove", ["p1", "p2"])
-GarbageFall = namedtuple("GarbageFall", ["placement_list"])
-PlaySequence = namedtuple("PlaySequence", ["board_list", "event_list"])
+
+PuyoPlc = namedtuple("PuyoPlacement", ["kind", "row", "col"])
+PlaySeq = namedtuple("PlaySequence", ["boards", "moves"])
 
 
-# In order for hidden and vanish row placements to be deduced, multiple
-# board states will be carried forward in parallel wherever there is
-# ambiguity. If at the end of the game there remains multiple valid
-# play sequences, the choice will be random.
+class PuyoLogicException(Exception):
+    """Exception for logical inconsistencies during play sequence deduction."""
+
+    def __init__(self, msg):
+        self.msg = msg
+
+    def __str__(self):
+        return self.msg
+
+
 def deducePlaySequence(board_seq, nextpuyo_seq):
     """Given a board sequence and the corresponding next puyos, deduce the
     move sequence (including garbage and hidden row usage).
@@ -32,7 +41,7 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
     # Initialize the starting play sequence.
     board = np.empty(shape=(13, 6), dtype=Puyo)
     board.fill(Puyo.NONE)
-    play_sequences = [PlaySequence(board_list=[board], event_list=[])]
+    play_sequences = [PlaySeq(boards=[board], moves=[])]
     nextpuyo_idx = 0
     board_seq = board_seq[1:]
     firstPop = True
@@ -40,26 +49,25 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
     # Loop through the board sequence to determine valid play sequences.
     for board in board_seq:
         new_play_sequences = []
-        popset = getPopSet(board)
+        popset = popSet(board)
 
         # If the previous board was a pop...
         if not firstPop:
             for play_seq in play_sequences:
-                prev_board = play_seq.board_list[-1]
+                prev_board = play_seq.boards[-1]
                 postpop_board = executePop(prev_board, popset)
                 # placeholder : validate/prune play_seq, post-pop
                 if not popset:
                     raise UserWarning("Last pop garbage check not implimented.")
                 else:
-                    new_play_sequences.append(
-                        extendPlaySequence(play_seq, postpop_board)
-                    )
+                    play_seq.boards.append(postpop_board)
+                    new_play_sequences.append(play_seq)
 
         else:
             nextpuyos = nextpuyo_seq[nextpuyo_idx]
             for play_seq in play_sequences:
                 new_play_sequences.extend(
-                    newPossiblePlaySequences(play_seq, board, nextpuyos)
+                    possiblePlaySequences(play_seq, board, nextpuyos)
                 )
             nextpuyo_idx += 1
             if popset:
@@ -71,164 +79,192 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
     return None
 
 
-def extendPlaySequence(play_seq, board, events=[]):
-    """Return a new play sequence extended by the given board and events."""
-
-    prev_board_seq = deepcopy(play_seq.board_list)
-    prev_board_seq.append(board)
-    prev_event_seq = deepcopy(play_seq.event_list)
-    prev_event_seq.extend(events)
-    return PlaySequence(board_list=prev_board_seq, event_list=prev_event_seq)
-
-
 def executePop(pop_board, popset):
     """Pop the puyos in popset and return the resulting board."""
 
     base = np.copy(pop_board)
-    for _, row, col in popset:
-        base[row, col] = Puyo.NONE
+    for puyo in popset:
+        base[puyo.row, puyo.col] = Puyo.NONE
 
     result = np.empty_like(base)
     result.fill(Puyo.NONE)
     for col_idx, puyo_col in enumerate(base.T):
         fall_idx = 0
-        for row_idx, puyo in enumerate(puyo_col):
-            if puyo is Puyo.NONE:
+        for row_idx, kind in enumerate(puyo_col):
+            if kind is Puyo.NONE:
                 fall_idx += 1
             else:
-                result[row_idx - fall_idx, col_idx] = puyo
+                result[row_idx - fall_idx, col_idx] = kind
 
     return result
 
 
-def newPossiblePlaySequences(play_seq, board, nextpuyos):
+def possiblePlaySequences(play_seq, next_board, nextpuyos):
     """Return list of possible play sequences."""
 
     new_play_sequences = []
-    prev_board = play_seq.board_list[-1]
+    prev_board = play_seq.boards[-1]
 
-    # Determine the possible moves given no pops.
-    deltas = boardDeltas(board, play_seq.board_list[-1])
-    moves, falls = possiblePuyoMoves(prev_board, nextpuyos, deltas)
+    # Determine the possible moves.
+    deltas = boardDeltas(next_board, prev_board)
+    move_list = possibleMoves(prev_board, nextpuyos, deltas)
 
     # Create new boards and subsequent play sequences.
-    new_boards, events = createNewBoards(prev_board, moves, falls)
-    for board, event in zip(new_boards, events):
-        new_play_sequences.append(extendPlaySequence(play_seq, board, event))
+    for moves in move_list:
+        new_play_seq = extendPlaySequence(play_seq, moves)
+        new_play_sequences.append(new_play_seq)
 
     return new_play_sequences
 
 
-def createNewBoards(prev_board, moves, falls):
-    """Return a list of boards created by applying a single move."""
+def extendPlaySequence(play_seq, next_moves):
+    """Return a new play sequence extended by the next moves."""
 
-    if falls:
-        UserWarning("New boards with garbage not implemented.")
+    boards = deepcopy(play_seq.boards)
+    moves = deepcopy(play_seq.moves)
+    next_board = applyMoves(boards[-1], next_moves)
+    boards.append(next_board)
+    moves.append(next_moves)
+    return PlaySeq(boards, moves)
 
-    new_boards = []
-    events = []
+
+def applyMoves(prev_board, moves):
+    """Return a new board created by applying a set of moves."""
+
+    next_board = np.copy(prev_board)
     for move in moves:
-        base = np.copy(prev_board)
-        base[move.p1.row, move.p1.col] = move.p1.puyo_type
-        base[move.p2.row, move.p2.col] = move.p2.puyo_type
-        new_boards.append(base)
-        events.append([move])
+        next_board[move.row, move.col] = move.kind
 
-    return new_boards, events
+    return next_board
 
 
-def possiblePuyoMoves(board, nextpuyo, deltas):
+def possibleMoves(board, nextpuyo, deltas):
     """Return the set of puyo moves possible given the board and deltas."""
 
-    # List of the non-garbage and garbage deltas.
-    color_deltas = [d for d in deltas if d.puyo_type is not Puyo.GARBAGE]
-    garbage_deltas = [d for d in deltas if d.puyo_type is Puyo.GARBAGE]
+    color_deltas = [d for d in deltas if d.kind is not Puyo.GARBAGE]
+    garbage_deltas = [d for d in deltas if d.kind is Puyo.GARBAGE]
+
+    if len(color_deltas) > 2:
+        raise PuyoLogicException("More than two puyos placed in one move.")
+
+    nextpuyo = Counter(nextpuyo)
+    base_move = set()
+
+    # First move does not have a defined next puyo.
+    if nextpuyo == Counter((None, None)):
+        if len(color_deltas) < 2:
+            raise PuyoLogicException("First move placed fewer than two puyos.")
+        base_move |= set(color_deltas)
+        color_moves = [base_move]
+
+    else:
+        for color_delta in color_deltas:
+            if color_delta.kind not in nextpuyo:
+                raise PuyoLogicException("Puyo placement does not match next puyos.")
+            base_move.add(color_delta)
+            nextpuyo.subtract([color_delta.kind])
+            nextpuyo += Counter()  # Delete items with zero count.
+
+        if nextpuyo:
+            color_moves = []
+            raise UserWarning("Hidden/vanish row color deltas not implimented.")
+        else:
+            color_moves = [base_move]
 
     if garbage_deltas:
-        raise UserWarning("Garbage falls not implemented.")
-
-    # Raise an error if there are more than two color deltas.
-    if len(color_deltas) > 2:
-        raise UserWarning("More than two puyos placed in one move.")
-
-    # If there are exactly two color deltas, then determine the move.
-    elif len(color_deltas) == 2:
-
-        # The first move does has next puyos that are None.
-        if nextpuyo[0] is None and nextpuyo[1] is None:
-            return [PuyoMove(color_deltas[0], color_deltas[1])], []
-
-        # If the next puyos match the two color deltas, return the move.
-        nextpuyos = Counter(nextpuyo)
-        deltacolors = Counter([cd.puyo_type for cd in color_deltas])
-        if nextpuyos == deltacolors:
-            return [PuyoMove(color_deltas[0], color_deltas[1])], []
-
-        raise UserWarning("The two puyos placed do not match the next puyos.")
-
-    # Handle single color deltas, garbage falls.
+        garbage_moves = []
+        raise UserWarning("Garbage deltas not implimented.")
     else:
-        raise UserWarning("Single color deltas not implemented.")
+        garbage_moves = color_moves
 
-    return None
+    return garbage_moves
 
 
-def boardDeltas(next_visible_board, prev_full_board):
-    """Return deltas of full_board relative to visible_board for visible
-    board positions only.
-    """
+def boardDeltas(next_board, prev_board):
+    """Return the differences between two (visible) boards."""
 
     deltas = set()
-    for (row, col), nv_puyo_type in np.ndenumerate(next_visible_board):
-        pf_puyo_type = prev_full_board[row, col]
-        if nv_puyo_type is not pf_puyo_type:
-            deltas.add(PuyoPlacement(nv_puyo_type, row, col))
+    for (row, col), next_kind in np.ndenumerate(next_board):
+        prev_kind = prev_board[row, col]
+        if next_kind is not prev_kind:
+            if prev_kind is not Puyo.NONE:
+                raise PuyoLogicException("An unpopped puyo has changed unexpectedly.")
+            deltas.add(PuyoPlc(kind=next_kind, row=row, col=col))
 
     return deltas
 
 
-def getPopSet(board):
-    """Return a set of puyos popping on the given board."""
+def popSet(board):
+    """Return the set of puyos popping on the given (visible) board."""
 
     popset = set()
-    for (row, col), puyo_type in np.ndenumerate(board):
-        if puyo_type is Puyo.NONE:
+    for (row, col), kind in np.ndenumerate(board):
+        puyo = PuyoPlc(kind=kind, row=row, col=col)
+
+        # Skip conditions.
+        if puyo.kind is Puyo.NONE or puyo.kind is Puyo.GARBAGE:
             continue
-        popgroup = set([PuyoPlacement(puyo_type, row, col)])
+        elif puyo in popset:
+            continue
+        elif puyo.row > 11:
+            continue
+
+        # Check for a new pop group.
+        popgroup = set([puyo])
         while True:
             puyos_to_add = set()
+
             for puyo in popgroup:
-                if puyo is Puyo.GARBAGE:
+                if puyo.kind is Puyo.GARBAGE:
                     continue
-                adjpuyos = getAdjPuyos(board, puyo)
-                filtered_adjpuyos = [
-                    p
-                    for p in adjpuyos
-                    if p.puyo_type is puyo.puyo_type or p.puyo_type is Puyo.GARBAGE
-                ]
-                puyos_to_add.update(filtered_adjpuyos)
+                adjpuyos = adjPuyos(board, puyo, type_filter=[puyo.kind, Puyo.GARBAGE])
+                puyos_to_add.update(adjpuyos)
+
             if popgroup >= puyos_to_add:
                 break
             else:
                 popgroup.update(puyos_to_add)
-        if len(popgroup) >= 4:
+
+        # At least four color puyos to a pop.
+        popgroup_color_count = 0
+        for puyo in popgroup:
+            if puyo.kind is not Puyo.GARBAGE:
+                popgroup_color_count += 1
+        if popgroup_color_count >= 4:
             popset.update(popgroup)
+
     return popset
 
 
-def getAdjPuyos(board, puyo):
-    """Return the set of adjacent puyo placements to the given puyo."""
+def adjPuyos(board, puyo, type_filter=[]):
+    """Return the set of puyos adjacent to the given (visible) puyo and subject to
+    the given type filter.
+    """
 
     adjset = set()
-    if puyo.row > 0:
-        adjset.add(PuyoPlacement(board[puyo.row - 1, puyo.col], puyo.row - 1, puyo.col))
-    if puyo.row < 11:
-        adjset.add(PuyoPlacement(board[puyo.row + 1, puyo.col], puyo.row + 1, puyo.col))
-    if puyo.col > 0:
-        adjset.add(PuyoPlacement(board[puyo.row, puyo.col - 1], puyo.row, puyo.col - 1))
-    if puyo.col < 5:
-        adjset.add(PuyoPlacement(board[puyo.row, puyo.col + 1], puyo.row, puyo.col + 1))
-    return adjset
+    if puyo.row > 0:  # Below
+        p = PuyoPlc(kind=board[puyo.row - 1, puyo.col], row=puyo.row - 1, col=puyo.col)
+        adjset.add(p)
+    if puyo.row < 11:  # Above
+        p = PuyoPlc(kind=board[puyo.row + 1, puyo.col], row=puyo.row + 1, col=puyo.col)
+        adjset.add(p)
+    if puyo.col > 0:  # Left
+        p = PuyoPlc(kind=board[puyo.row, puyo.col - 1], row=puyo.row, col=puyo.col - 1)
+        adjset.add(p)
+    if puyo.col < 5:  # Right
+        p = PuyoPlc(kind=board[puyo.row, puyo.col + 1], row=puyo.row, col=puyo.col + 1)
+
+    if not type_filter:
+        return adjset
+
+    filterset = set()
+    for puyo in adjset:  # Filter
+        for kind in type_filter:
+            if puyo.kind is kind:
+                filterset.add(puyo)
+                break
+
+    return filterset
 
 
 def main():
