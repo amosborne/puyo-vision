@@ -51,12 +51,17 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
         new_play_sequences = []
         popset = popSet(board)
 
+        if not play_sequences:
+            raise PuyoLogicException("No known valid play sequences.")
+
         # If the previous board was a pop...
         if not firstPop:
             for play_seq in play_sequences:
                 prev_board = play_seq.boards[-1]
-                postpop_board = executePop(prev_board, popset)
-                # placeholder : validate/prune play_seq, post-pop
+                prev_popset = popSet(prev_board)
+                postpop_board = executePop(prev_board, prev_popset)
+                if playSeqInvalid(board, postpop_board):
+                    continue
                 if not popset:
                     raise UserWarning("Last pop garbage check not implimented.")
                 else:
@@ -77,6 +82,22 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
         play_sequences = new_play_sequences
 
     return None
+
+
+def playSeqInvalid(next_board, postpop_board):
+    """Return true (invalid) if the visible area of the predicted board
+    does not match the next board.
+    """
+
+    invalid = False
+    try:
+        deltas = boardDeltas(next_board, postpop_board)
+        if deltas:
+            invalid = True
+    except PuyoLogicException:
+        invalid = True
+
+    return invalid
 
 
 def executePop(pop_board, popset):
