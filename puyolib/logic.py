@@ -1,11 +1,51 @@
-from collections import namedtuple, Counter
+from collections import namedtuple, Counter, defaultdict
 from copy import deepcopy
 from itertools import chain, combinations
 from puyolib.puyo import Puyo
 import numpy as np
 
 from puyolib.robustify import robustClassify
+from puyolib.debug import plotBoardState
+import matplotlib.pyplot as plt
 import pickle
+
+import logging
+
+LOGGER = logging.getLogger(__name__)
+
+if not LOGGER.handlers:
+    _log_handler = logging.StreamHandler()
+    _log_handler.setFormatter(
+        logging.Formatter("[%(filename)s:%(lineno)d] %(levelname)s: %(message)s")
+    )
+    LOGGER.addHandler(_log_handler)
+
+
+def coord2string(coord):
+    return "({row:>2}, {col})".format(row=coord[0], col=coord[1])
+
+
+def kind2string(kind):
+    return "{kind:<8}".format(kind=kind.name)
+
+
+def logPopSet(popset):
+    """Log the given pop set by grouping puyo kinds together, unordered."""
+
+    popgroups = defaultdict(list)
+    for puyo in popset:
+        popgroups[puyo.kind].append((puyo.row, puyo.col))
+
+    message = "Pop set identified.\n"
+    for kind, coords in popgroups.items():
+        line = "    " + kind2string(kind)
+        for coord in coords:
+            line += " " + coord2string(coord) + ","
+        line += "\n"
+        message += line
+
+    LOGGER.debug(message)
+
 
 """
 The board is 13 rows (12 plus the hidden row) and 6 columns, 0 indexed.
@@ -56,7 +96,10 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
     # Loop through the board sequence to determine valid play sequences.
     for board in board_seq:
         new_play_sequences = []
+
         popset = popSet(board)
+        if popset:
+            logPopSet(popset)
 
         if not play_sequences:
             raise PuyoLogicException("No known valid play sequences.")
@@ -67,6 +110,12 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
                 prev_board = play_seq.boards[-1]
                 prev_popset = popSet(prev_board)
                 postpop_board = executePop(prev_board, prev_popset)
+
+                # DEBUG
+                # img = plotBoardState(postpop_board)
+                # plt.imshow(img)
+                # plt.show()
+
                 if not popset:
                     if playSeqInvalid(board, postpop_board, islastpop=True):
                         continue
@@ -94,13 +143,17 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
                 new_play_sequences.extend(
                     possiblePlaySequences(play_seq, board, nextpuyos)
                 )
+            # DEBUG
+            # img = plotBoardState(new_play_sequences[0].boards[-1])
+            # plt.imshow(img)
+            # plt.show()
             nextpuyo_idx += 1
             if popset:
                 firstPop = False
 
         # Update the play sequences.
         play_sequences = new_play_sequences
-        print(len(play_sequences), play_sequences[0].moves)
+        # print(len(play_sequences), play_sequences[0].moves)
 
     return None
 
@@ -234,7 +287,7 @@ def possibleGarbage(board, gbg_deltas):
                 top_row += 1
         if gbg_height > gbg_max_height:
             raise PuyoLogicException("Inconsistent garbage heights.")
-        if top_row == 11 and gbg_height < gbg_max_height:
+        if top_row == 12 and gbg_height < gbg_max_height:
             if gbg_height < gbg_min_height:
                 certain_hidden_gbg.add(PuyoPlc(kind=Puyo.GARBAGE, row=12, col=col_idx))
             else:
@@ -358,7 +411,15 @@ def possibleMoves(board, nextpuyo, deltas):
             color_moves = set([frozenset(color_deltas)])
 
     if garbage_deltas:
-        raise UserWarning("Garbage deltas not implimented.")
+        garbage_moves = set()
+        for color_move in color_moves:
+            pre_gbg_board = applyMoves(board, color_move)
+            certain_gbg, possible_gbg = possibleGarbage(pre_gbg_board, garbage_deltas)
+            for unc_move in powerset(possible_gbg):
+                final_move = frozenset(
+                    color_move | garbage_deltas | certain_gbg | set(unc_move)
+                )
+                garbage_moves.add(final_move)
     else:
         garbage_moves = color_moves
 
@@ -403,6 +464,7 @@ def popSet(board):
                 if puyo.kind is Puyo.GARBAGE:
                     continue
                 adjpuyos = adjPuyos(board, puyo, type_filter=[puyo.kind, Puyo.GARBAGE])
+
                 puyos_to_add.update(adjpuyos)
 
             if popgroup >= puyos_to_add:
@@ -421,7 +483,7 @@ def popSet(board):
     return popset
 
 
-def adjPuyos(board, puyo, type_filter=[]):
+def adjPuyos(board, puyo, type_filter=set()):
     """Return the set of puyos adjacent to the given (visible) puyo and subject to
     the given type filter.
     """
@@ -438,21 +500,17 @@ def adjPuyos(board, puyo, type_filter=[]):
         adjset.add(p)
     if puyo.col < 5:  # Right
         p = PuyoPlc(kind=board[puyo.row, puyo.col + 1], row=puyo.row, col=puyo.col + 1)
+        adjset.add(p)
 
     if not type_filter:
         return adjset
-
-    filterset = set()
-    for puyo in adjset:  # Filter
-        for kind in type_filter:
-            if puyo.kind is kind:
-                filterset.add(puyo)
-                break
-
-    return filterset
+    else:
+        return set(filter(lambda puyo: puyo.kind in type_filter, adjset))
 
 
 def main():
+    LOGGER.setLevel(logging.DEBUG)
+
     # Load the board state sequence pre-deduction.
     record = pickle.load(open("results/testing_results/0:01:20.p", "rb"))
     board_state_seq, nextpuyo_seq = robustClassify(record.p1clf)

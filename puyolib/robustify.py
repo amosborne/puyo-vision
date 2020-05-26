@@ -383,7 +383,7 @@ def getNextPuyoSequence(raw_nextpuyo, transitions):
     endcapped_transitions = [0] + transitions + [len(raw_nextpuyo)]
     raw_puyo1, raw_puyo2 = list(zip(*raw_nextpuyo))
     nextpuyo_seq = [(None, None)]  # First nextpuyo unknown, last nextpuyo unused.
-    for idx, this_trans in enumerate(endcapped_transitions[:-3]):
+    for idx, this_trans in enumerate(endcapped_transitions[:-2]):
         next_trans = endcapped_transitions[idx + 1]
         puyo1_count = Counter(raw_puyo1[this_trans:next_trans])
         puyo2_count = Counter(raw_puyo2[this_trans:next_trans])
