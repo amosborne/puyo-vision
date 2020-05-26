@@ -47,6 +47,24 @@ def logPopSet(popset):
     LOGGER.debug(message)
 
 
+def logDivergingSequence(moves):
+    """Log the given set of uncertain moves by grouping puyo kinds together, unordered."""
+
+    movegroups = defaultdict(list)
+    for puyo in moves:
+        movegroups[puyo.kind].append((puyo.row, puyo.col))
+
+    message = "Play sequence diverging.\n"
+    for kind, coords in movegroups.items():
+        line = "    " + kind2string(kind)
+        for coord in coords:
+            line += " " + coord2string(coord) + ","
+        line += "\n"
+        message += line
+
+    LOGGER.info(message)
+
+
 """
 The board is 13 rows (12 plus the hidden row) and 6 columns, 0 indexed.
 A puyo placement is a puyo type at a board position. The position may be
@@ -111,25 +129,27 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
                 prev_popset = popSet(prev_board)
                 postpop_board = executePop(prev_board, prev_popset)
 
-                # DEBUG
-                # img = plotBoardState(postpop_board)
-                # plt.imshow(img)
-                # plt.show()
-
                 if not popset:
                     if playSeqInvalid(board, postpop_board, islastpop=True):
                         continue
                     play_seq.boards.append(postpop_board)
                     deltas = boardDeltas(board, postpop_board)
                     certain_gbg, possible_gbg = possibleGarbage(postpop_board, deltas)
-                    certain_moves = deltas | certain_gbg
-                    new_play_sequences.extend(
-                        extendUncertainPlaySequence(
+
+                    if possible_gbg:
+                        logDivergingSequence(possible_gbg)
+
+                    if deltas | certain_gbg | possible_gbg:
+                        certain_moves = deltas | certain_gbg
+                        new_play_seqs_to_add = extendUncertainPlaySequence(
                             play_seq, certain_moves, uncertain_moves=possible_gbg
                         )
-                    )
-                    for new_play_seq in new_play_sequences:
-                        del new_play_seq.boards[-2]  # Hack to remove extra board.
+                        for seq in new_play_seqs_to_add:
+                            del seq.boards[-2]  # Hack to remove extra board.
+                        new_play_sequences.extend(new_play_seqs_to_add)
+                    else:
+                        new_play_sequences.append(play_seq)
+
                     firstPop = True
                 else:
                     if playSeqInvalid(board, postpop_board, islastpop=False):
@@ -143,20 +163,18 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
                 new_play_sequences.extend(
                     possiblePlaySequences(play_seq, board, nextpuyos)
                 )
-            # DEBUG
-            # img = plotBoardState(new_play_sequences[0].boards[-1])
-            # plt.imshow(img)
-            # plt.show()
+
             nextpuyo_idx += 1
             if popset:
                 firstPop = False
 
         # Update the play sequences.
         play_sequences = new_play_sequences
-        # print(len(play_sequences), play_sequences[0].moves)
+
+    return play_sequences[1]
 
     if len(play_sequences) == 1:
-        return play_sequences[0]
+        return play_sequences.pop()
     else:
         print(len(play_sequences))
         raise UserWarning("Multiple valid play sequences not implimented.")
@@ -224,6 +242,9 @@ def extendUncertainPlaySequence(play_seq, certain_moves, uncertain_moves):
     """Return a list of possible play sequences where any number of uncertain
     moves may be applied in addition to the certain moves.
     """
+
+    if certain_moves and not uncertain_moves:
+        return [extendPlaySequence(play_seq, certain_moves)]
 
     new_play_sequences = []
     for unc_move in powerset(uncertain_moves):
@@ -315,15 +336,17 @@ def possibleColor(board, certain_move, remaining_puyos):
         )
 
     hidden_spots, _ = invisiblePositions(board)
+    unc_move_set = set()
     move_set = set()
     for row, col in hidden_spots:
         certain_submove = PuyoPlc(kind=remaining_puyos[0], row=row, col=col)
-        move_subset = possibleColorConstrained(
+        move_subset, unc_move_subset = possibleColorConstrained(
             board, certain_submove, remaining_puyos[1]
         )
         move_set |= move_subset
+        unc_move_set |= unc_move_subset
 
-    return move_set
+    return move_set, unc_move_set
 
 
 def possibleColorConstrained(board, certain_move, remaining_puyo):
@@ -334,12 +357,18 @@ def possibleColorConstrained(board, certain_move, remaining_puyo):
         base_board, col_constraint=certain_move.col
     )
 
+    unc_move_set = set()
     move_set = set()
     for row, col in hidden_spots | vanish_spots:
-        move = frozenset({certain_move, PuyoPlc(kind=remaining_puyo, row=row, col=col)})
+        unc_move = PuyoPlc(kind=remaining_puyo, row=row, col=col)
+        move = frozenset([certain_move, unc_move])
         move_set.add(move)
+        unc_move_set.add(unc_move)
 
-    return move_set
+    if len(unc_move_set) == 1:
+        unc_move_set = set()
+
+    return move_set, unc_move_set
 
 
 def invisiblePositions(board, col_constraint=None):
@@ -357,7 +386,6 @@ def invisiblePositions(board, col_constraint=None):
 
         if height == 12:
             hidden.add((height, col_idx))
-            vanish.add((height + 1, col_idx))
         elif height == 13 and adjheight == 12:
             vanish.add((height, col_idx))
 
@@ -391,8 +419,8 @@ def columnHeight(board, col_idx):
 def possibleMoves(board, nextpuyo, deltas):
     """Return the set of puyo moves possible given the board and deltas."""
 
-    color_deltas = {d for d in deltas if d.kind is not Puyo.GARBAGE}
-    garbage_deltas = {d for d in deltas if d.kind is Puyo.GARBAGE}
+    color_deltas = set([d for d in deltas if d.kind is not Puyo.GARBAGE])
+    garbage_deltas = set([d for d in deltas if d.kind is Puyo.GARBAGE])
 
     if len(color_deltas) > 2:
         raise PuyoLogicException("More than two puyos placed in one move.")
@@ -403,6 +431,7 @@ def possibleMoves(board, nextpuyo, deltas):
         if len(color_deltas) < 2:
             raise PuyoLogicException("First move placed fewer than two puyos.")
         color_moves = set([frozenset(color_deltas)])
+        unc_color_moves = set()
 
     else:
         base_move = set()
@@ -414,22 +443,27 @@ def possibleMoves(board, nextpuyo, deltas):
             nextpuyo += Counter()  # Delete items with zero count.
 
         if nextpuyo:
-            color_moves = possibleColor(board, base_move, set(nextpuyo.elements()))
+            color_moves, unc_color_moves = possibleColor(
+                board, base_move, set(nextpuyo.elements())
+            )
         else:
             color_moves = set([frozenset(color_deltas)])
+            unc_color_moves = set()
 
-    if garbage_deltas:
-        garbage_moves = set()
-        for color_move in color_moves:
-            pre_gbg_board = applyMoves(board, color_move)
-            certain_gbg, possible_gbg = possibleGarbage(pre_gbg_board, garbage_deltas)
-            for unc_move in powerset(possible_gbg):
-                final_move = frozenset(
-                    color_move | garbage_deltas | certain_gbg | set(unc_move)
-                )
-                garbage_moves.add(final_move)
-    else:
-        garbage_moves = color_moves
+    unc_final_moves = unc_color_moves
+    garbage_moves = set()
+    for color_move in color_moves:
+        pre_gbg_board = applyMoves(board, color_move)
+        certain_gbg, possible_gbg = possibleGarbage(pre_gbg_board, garbage_deltas)
+        for unc_move in powerset(possible_gbg):
+            final_move = frozenset(
+                color_move | garbage_deltas | certain_gbg | set(unc_move)
+            )
+            garbage_moves.add(final_move)
+        unc_final_moves |= possible_gbg
+
+    if unc_final_moves:
+        logDivergingSequence(unc_final_moves)
 
     return garbage_moves
 
@@ -520,7 +554,7 @@ def main():
     LOGGER.setLevel(logging.DEBUG)
 
     # Load the board state sequence pre-deduction.
-    record = pickle.load(open("results/testing_results/0:01:20.p", "rb"))
+    record = pickle.load(open("results/testing_results/0:00:09.p", "rb"))
     # board_state_seq, nextpuyo_seq = robustClassify(record.p1clf)
     board_state_seq, nextpuyo_seq = robustClassify(record.p2clf)
 
