@@ -6,7 +6,7 @@ import numpy as np
 
 from puyolib.robustify import robustClassify
 from puyolib.debug import plotBoardState
-import matplotlib.pyplot as plt
+import cv2
 import pickle
 
 import logging
@@ -155,7 +155,10 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
         play_sequences = new_play_sequences
         # print(len(play_sequences), play_sequences[0].moves)
 
-    return None
+    if len(play_sequences) == 1:
+        return play_sequences[0]
+    else:
+        raise UserWarning("Multiple valid play sequences not implimented.")
 
 
 def playSeqInvalid(next_board, postpop_board, islastpop):
@@ -518,7 +521,14 @@ def main():
 
     # Deduce the play sequence and the new board states.
     board_seq = [state.board for state in board_state_seq]
-    deducePlaySequence(board_seq, nextpuyo_seq)
+    play_seq = deducePlaySequence(board_seq, nextpuyo_seq)
+
+    for board in play_seq.boards:
+        cv2.imshow("", plotBoardState(board))
+        press = cv2.waitKey(0)
+        if press & 0xFF == ord("q"):
+            break
+    cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

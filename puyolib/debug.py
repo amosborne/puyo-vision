@@ -32,13 +32,22 @@ def plotBoardState(board):  # TODO: Add hidden row input and plotting.
     if board is not None:
         for ix, iy in np.ndindex(board.shape):
             if board[ix, iy] is not Puyo.NONE:
-                ax2.plot(
-                    iy + 0.5,
-                    ix + 0.5,
-                    "o",
-                    markersize=11,
-                    color=_PUYO_COLORS[board[ix, iy]],
-                )
+                if ix == 12:
+                    ax1.plot(
+                        iy + 0.5,
+                        0.5,
+                        "o",
+                        markersize=11,
+                        color=_PUYO_COLORS[board[ix, iy]],
+                    )
+                else:
+                    ax2.plot(
+                        iy + 0.5,
+                        ix + 0.5,
+                        "o",
+                        markersize=11,
+                        color=_PUYO_COLORS[board[ix, iy]],
+                    )
 
     plt.setp(
         ax2, xticks=range(0, 7), xticklabels="", yticks=range(0, 13), yticklabels=""
