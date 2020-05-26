@@ -158,6 +158,7 @@ def deducePlaySequence(board_seq, nextpuyo_seq):
     if len(play_sequences) == 1:
         return play_sequences[0]
     else:
+        print(len(play_sequences))
         raise UserWarning("Multiple valid play sequences not implimented.")
 
 
@@ -261,17 +262,21 @@ def possibleGarbage(board, gbg_deltas):
     """
 
     gbg_base_board = applyMoves(board, gbg_deltas)
-
     # Find the minimum garbage height. No more than five rows at a time.
     gbg_min_height = 5
     for col_idx, puyo_col in enumerate(gbg_base_board.T):
         gbg_col_height = 0
+        hasgap = False
         for row_idx, kind in enumerate(puyo_col):
+            if row_idx == 12:
+                continue
             pre_gbg = board[row_idx, col_idx]
             post_gbg = gbg_base_board[row_idx, col_idx]
             if pre_gbg is Puyo.NONE and post_gbg is Puyo.GARBAGE:
                 gbg_col_height += 1
-        if gbg_col_height < gbg_min_height:
+            elif post_gbg is Puyo.NONE:
+                hasgap = True
+        if gbg_col_height < gbg_min_height and hasgap:
             gbg_min_height = gbg_col_height
 
     # Find all hidden row positions that garbage could be in.
@@ -516,8 +521,8 @@ def main():
 
     # Load the board state sequence pre-deduction.
     record = pickle.load(open("results/testing_results/0:01:20.p", "rb"))
-    board_state_seq, nextpuyo_seq = robustClassify(record.p1clf)
-    # board_state_seq, nextpuyo_seq = robustClassify(record.p2clf)
+    # board_state_seq, nextpuyo_seq = robustClassify(record.p1clf)
+    board_state_seq, nextpuyo_seq = robustClassify(record.p2clf)
 
     # Deduce the play sequence and the new board states.
     board_seq = [state.board for state in board_state_seq]
